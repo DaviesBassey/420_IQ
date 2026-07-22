@@ -167,6 +167,11 @@ export class AudioEngine {
     this.convolver?.disconnect();
     this.reverbReturn?.disconnect();
     this.masterGain?.disconnect();
+    this.cueBus = null;
+    this.convolver = null;
+    this.reverbReturn = null;
+    this.masterGain = null;
+    this.ctx = null;
     this._armed = false;
   }
 }
