@@ -6,7 +6,7 @@
 
 **Architecture:** Three layers in one Next.js app — pure-TypeScript domain layer (FSM, scoring, fairness solver; no I/O), data layer (Drizzle + SQLite behind repository interfaces), app layer (API routes, SSE stream, display UIs). The server game engine is the single authority for state and score; displays only render pushed state.
 
-**Tech Stack:** Next.js 15 (App Router), React 19, TypeScript 5 (strict), pnpm, Drizzle ORM + better-sqlite3, zod, Vitest + fast-check, Playwright.
+**Tech Stack:** Next.js 16 (App Router; installed by create-next-app, plan updated from 15 — route handlers use async params), React 19, TypeScript 5 (strict), pnpm, Drizzle ORM + better-sqlite3, zod, Vitest + fast-check, Playwright.
 
 ## Global Constraints
 
