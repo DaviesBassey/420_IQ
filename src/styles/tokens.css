@@ -14,9 +14,11 @@
   --dur-micro: 160ms;
   --dur-reveal: 400ms;
   --dur-ceremony: 1200ms;
+  --font-display: 'Archivo', sans-serif;
+  --font-ui: 'Inter', sans-serif;
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-micro: 0ms; --dur-reveal: 150ms; --dur-ceremony: 150ms; }
 }
-body { background: var(--graphite-900); color: var(--offwhite); }
+body { background: var(--graphite-900); color: var(--offwhite); font-family: var(--font-ui); }
 :focus-visible { outline: 2px solid var(--amber-bright); outline-offset: 2px; }
