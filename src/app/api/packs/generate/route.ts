@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getRepos } from '@/server/context';
 import { generatePack } from '@/server/packService';
+import { requireRole } from '@/server/auth';
 
 const bodySchema = z.object({
   episodeId: z.string(),
@@ -10,6 +11,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
+  try {
+    await requireRole(req, ['producer', 'editor']);
+  } catch (err) {
+    if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+      return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+    throw err;
+  }
+
   let body: unknown;
   try {
     body = await req.json();

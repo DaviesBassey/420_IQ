@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getEngine, engineErrorStatus } from '@/server/gameEngine';
+import { requireRole } from '@/server/auth';
 
 const typeSchema = z.enum(['TRUSTED_CIRCLE', 'SOURCE_SIGNAL']);
 
@@ -10,6 +11,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string; type: string }> }) {
+  try {
+    await requireRole(req, ['producer']);
+  } catch (err) {
+    if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+      return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+    throw err;
+  }
+
   const { id, type } = await params;
 
   const parsedType = typeSchema.safeParse(type);

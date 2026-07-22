@@ -72,3 +72,38 @@ export async function verifySession(token: string | undefined, secret: string): 
   if (!timingSafeEqualHex(sig, expectedSig)) return null;
   return role as Role;
 }
+
+// Parses a raw `Cookie` request header into a name -> value map. Route
+// handlers here run on the Node runtime and receive a standard Fetch API
+// `Request`, which has no built-in cookie jar (unlike NextRequest in
+// middleware), so we parse the header by hand.
+function parseCookieHeader(header: string | null): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (!key) continue;
+    try {
+      cookies[key] = decodeURIComponent(value);
+    } catch {
+      cookies[key] = value;
+    }
+  }
+  return cookies;
+}
+
+// Authenticates a producer/editor mutation route: reads the `iq_session`
+// cookie off the raw Cookie header, verifies it, and checks the resulting
+// role is in the allowed set. Throws Error('UNAUTHORIZED') otherwise, which
+// callers map to a 401 response.
+export async function requireRole(req: Request, allowed: Role[]): Promise<Role> {
+  const cookies = parseCookieHeader(req.headers.get('cookie'));
+  const role = await verifySession(cookies['iq_session'], getSecret());
+  if (!role || !allowed.includes(role)) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return role;
+}
