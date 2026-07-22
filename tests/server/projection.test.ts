@@ -28,4 +28,10 @@ describe('projectForRole', () => {
   it('carries the hold flag', () => {
     expect(projectForRole(base({}), 'stage', true).hold).toBe(true);
   });
+  it('copies the reveal object rather than aliasing it', () => {
+    const s = base({ state: 'REVEAL', reveal: { correctIndex: 1, choices: ['a','b'] } as any });
+    const p = projectForRole(s, 'host', false);
+    expect(p.reveal).not.toBe(s.reveal);
+    expect(p.reveal).toEqual(expect.objectContaining({ correctIndex: 1 }));
+  });
 });

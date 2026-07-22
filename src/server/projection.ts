@@ -45,7 +45,7 @@ export function projectForRole(snap: GameSnapshot, role: Role, hold: boolean): P
       Object.entries(snap.lifelines).map(([id, used]) => [id, { ...used }]),
     ),
     publicQuestion: projectPublicQuestion(snap.publicQuestion, role, snap.state),
-    reveal: revealVisible ? snap.reveal : null,
+    reveal: revealVisible && snap.reveal ? { ...snap.reveal, choices: Array.isArray(snap.reveal.choices) ? [...snap.reveal.choices] : snap.reveal.choices } : null,
     confidence: snap.confidence,
     stealOpen: snap.stealOpen,
     hold,
