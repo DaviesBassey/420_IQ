@@ -171,6 +171,11 @@ export class AudioEngine {
     this.convolver = null;
     this.reverbReturn = null;
     this.masterGain = null;
+    if (this.ctx && typeof this.ctx.close === 'function') {
+      try {
+        this.ctx.close();
+      } catch {}
+    }
     this.ctx = null;
     this._armed = false;
   }

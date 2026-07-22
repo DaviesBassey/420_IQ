@@ -6,6 +6,8 @@ import { useGameStream } from '@/components/useGameStream';
 import { QuestionCard } from '@/components/QuestionCard';
 import { HoldScreen } from '@/components/HoldScreen';
 import { TimerChip } from '@/components/TimerChip';
+import { hostLineFor } from '@/domain/hostScript';
+import '@/styles/broadcast.css';
 
 const pageStyle: CSSProperties = {
   minHeight: '100vh',
@@ -75,6 +77,13 @@ function HostView({ gameId }: { gameId: string }) {
 
   return (
     <div style={pageStyle}>
+      <div className="broadcast-teleprompter">
+        <span className="broadcast-teleprompter__label">SAY</span>
+        <span key={snapshot.state} className="broadcast-teleprompter__line">
+          {hostLineFor(snapshot.state)}
+        </span>
+      </div>
+
       <div style={stateBadgeStyle}>{snapshot.state}</div>
 
       {snapshot.timer && <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />}

@@ -1,0 +1,124 @@
+/* Broadcast Mode presentation layer: host lower-third, contestant spotlight,
+   teleprompter card, and the cinematic reveal animation. Colours come only
+   from tokens.css custom properties -- no new hex values, no green as a
+   brand colour (signal-green is reserved for correctness cues elsewhere).
+   All motion here is guarded by prefers-reduced-motion via the shared
+   --dur-* custom properties (already zeroed under reduced motion in
+   tokens.css) and by an explicit @media override below for keyframe
+   animations that don't route through those durations. */
+
+.broadcast-lowerthird {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: baseline;
+  gap: 0.85rem;
+  max-width: min(90vw, 960px);
+  padding: 0.85rem 1.75rem;
+  border-radius: 10px;
+  background: var(--graphite-700);
+  border: 1px solid var(--amber-deep);
+  box-shadow: inset 0 0 0 1px rgba(242, 239, 232, 0.06);
+}
+
+.broadcast-lowerthird__label {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--amber-bright);
+}
+
+.broadcast-lowerthird__line {
+  font-family: var(--font-ui);
+  font-size: 1.05rem;
+  color: var(--offwhite);
+  animation: broadcast-line-fade var(--dur-reveal) var(--ease-premium);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .broadcast-lowerthird__line {
+    animation: none;
+  }
+}
+
+@keyframes broadcast-line-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Contestant spotlight -- applied to the existing scoreboard cards. */
+.spotlight-active {
+  box-shadow: 0 0 0 2px var(--amber-bright), 0 0 24px rgba(255, 180, 56, 0.35);
+}
+
+.spotlight-active .spotlight-name {
+  color: var(--amber-bright);
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.spotlight-dim {
+  opacity: 0.55;
+}
+
+.spotlight-dim .spotlight-name {
+  color: var(--offwhite);
+}
+
+/* Host teleprompter card -- present on the host display in every state. */
+.broadcast-teleprompter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 12px;
+  background: var(--graphite-700);
+  border: 2px solid var(--ultraviolet);
+}
+
+.broadcast-teleprompter__label {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  color: var(--ultraviolet);
+}
+
+.broadcast-teleprompter__line {
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2.4vw, 1.75rem);
+  font-weight: 600;
+  color: var(--offwhite);
+}
+
+/* Cinematic reveal -- keyed remount per new question fades/scales the stem
+   and category label in. */
+.broadcast-reveal {
+  animation: broadcast-reveal-in var(--dur-ceremony) var(--ease-premium);
+}
+
+@keyframes broadcast-reveal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .broadcast-reveal {
+    animation: none;
+  }
+}

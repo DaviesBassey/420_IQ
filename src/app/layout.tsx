@@ -7,6 +7,7 @@ import "./globals.css";
 import "../styles/tokens.css";
 import "../styles/ring.css";
 import "../styles/themes.css";
+import "../styles/broadcast.css";
 
 export const metadata: Metadata = {
   title: "420 IQ — Pilot Control System",
