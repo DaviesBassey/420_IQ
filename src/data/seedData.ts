@@ -213,16 +213,18 @@ function capitalize(s: string): string {
 
 export const DEMO_BANK: (QuestionVersionData & { status: 'APPROVED' })[] = buildDemoBank();
 
-// Three demo Source Signal entries for a DEMO_BANK question (Task 21): the
-// VERIFIED signal restates the correct choice's fact so the lifeline has a
-// genuinely correct answer to surface; the other two are clearly-labelled
-// demo text per the brief (labelled '[DEMO]' throughout, same convention as
-// the rest of buildDemoBank's stems/explanations).
+// Three demo Source Signal entries for a DEMO_BANK question (Task 21). None of
+// the three texts may name the correct choice or self-label as 'verified' —
+// doing either would hand the contestant the answer for free before they
+// select a signal, defeating the whole point of the lifeline. All three read
+// as equally plausible until the contestant picks one and selectSignal()
+// reveals which position was actually VERIFIED (labelled '[DEMO]' throughout,
+// same convention as the rest of buildDemoBank's stems/explanations).
 function demoSignalsFor(q: QuestionVersionData): { text: string; kind: 'VERIFIED' | 'UNRELIABLE' | 'DISTRACTOR' }[] {
   const topicNumber = q.factKey.split('-').pop();
   const topic = `${q.domain} question ${topicNumber}`;
   return [
-    { text: `[DEMO] Verified: ${q.choices[q.correctIndex]}.`, kind: 'VERIFIED' },
+    { text: `[DEMO] A sourced statement consistent with the documented facts about ${topic}.`, kind: 'VERIFIED' },
     { text: `[DEMO] A commonly repeated but unreliable belief about ${topic}.`, kind: 'UNRELIABLE' },
     { text: `[DEMO] A plausible but wrong signal about ${topic}.`, kind: 'DISTRACTOR' },
   ];

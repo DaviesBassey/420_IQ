@@ -53,7 +53,16 @@ describe('Source Signal', () => {
     if (s.lifelineDetail?.type !== 'SOURCE_SIGNAL') throw new Error('wrong detail');
     expect(s.lifelineDetail.signals).toHaveLength(3);
     expect(s.lifelineDetail.verifiedIndex).toBeNull();
-    expect(JSON.stringify(s.lifelineDetail)).not.toContain('VERIFIED');
+    // Case-insensitive: no signal text may self-label as the verified one
+    // (scoped to the signals themselves — s.lifelineDetail.verifiedIndex is a
+    // legitimate field name that would otherwise false-positive the match).
+    expect(JSON.stringify(s.lifelineDetail.signals)).not.toMatch(/verified/i);
+    // ...and no signal may hand over the answer by quoting the correct choice.
+    const qv = await repos.questions.latestVersion(s.publicQuestion!.questionId);
+    const correctChoiceText = qv!.choices[qv!.correctIndex];
+    for (const signal of s.lifelineDetail.signals) {
+      expect(signal.text).not.toContain(correctChoiceText);
+    }
     const after = await engine.selectSignal(gameId, 1, 'kD');
     if (after.lifelineDetail?.type !== 'SOURCE_SIGNAL') throw new Error('wrong detail');
     expect(after.lifelineDetail.verifiedIndex).not.toBeNull();
