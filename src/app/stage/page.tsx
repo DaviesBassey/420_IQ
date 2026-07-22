@@ -6,8 +6,19 @@ import { useGameStream } from '@/components/useGameStream';
 import { KnowledgeRing, type RingSegmentState, type KnowledgeRingProps } from '@/components/KnowledgeRing';
 import { HoldScreen } from '@/components/HoldScreen';
 import { TimerChip } from '@/components/TimerChip';
+import { AudioArm } from '@/components/AudioArm';
+import { useBroadcastAudio } from '@/audio/useBroadcastAudio';
+import { hostLineFor } from '@/domain/hostScript';
 import type { GameState } from '@/domain/fsm';
 import '@/styles/stage.css';
+import '@/styles/broadcast.css';
+
+const audioArmCornerStyle: CSSProperties = {
+  position: 'fixed',
+  top: '1rem',
+  right: '1rem',
+  zIndex: 20,
+};
 
 const waitingStyle: CSSProperties = {
   minHeight: '100vh',
@@ -144,12 +155,31 @@ function segmentsFor(questionIndex: number): RingSegmentState[] {
 
 function StageView({ gameId, vertical }: { gameId: string; vertical: boolean }) {
   const snapshot = useGameStream(gameId, 'stage');
+  // useBroadcastAudio must run unconditionally, before any early return, so
+  // hook order never varies across renders -- the hook itself tolerates a
+  // null snapshot (see useBroadcastAudio.ts).
+  const audio = useBroadcastAudio(snapshot);
+  const audioArm = (
+    <div style={audioArmCornerStyle}>
+      <AudioArm armed={audio.armed} muted={audio.muted} onArm={audio.arm} onToggleMute={audio.toggleMute} />
+    </div>
+  );
 
   if (!snapshot) {
-    return <div style={waitingStyle}>Waiting for game {gameId}…</div>;
+    return (
+      <div style={waitingStyle}>
+        {audioArm}
+        Waiting for game {gameId}…
+      </div>
+    );
   }
   if (snapshot.hold) {
-    return <HoldScreen />;
+    return (
+      <>
+        {audioArm}
+        <HoldScreen />
+      </>
+    );
   }
 
   // Contestant order and display names come from snapshot.contestants (array
@@ -160,16 +190,28 @@ function StageView({ gameId, vertical }: { gameId: string; vertical: boolean }) 
   const ringState = ringStateFor(snapshot.state);
   const knowledgeDropText = snapshot.state === 'KNOWLEDGE_DROP' ? snapshot.reveal?.knowledgeDrop ?? null : null;
   const lifelineStatus = lifelineStatusText(snapshot.lifelineDetail);
+  const hostLine = hostLineFor(snapshot.state);
+  const themeClass = snapshot.publicQuestion ? `theme-${snapshot.publicQuestion.domain}` : '';
 
   return (
     <div className={`stage-grid${vertical ? ' stage-grid--vertical' : ''}`}>
+      {audioArm}
+
       <div className="stage-grid__ribbon">
-        {contestants.map((c) => (
-          <div key={c.id} style={scoreCardStyle(snapshot.activeContestantId === c.id)}>
-            <div style={scoreCardIdStyle}>{c.name}</div>
-            <div style={scoreCardValueStyle}>{snapshot.scores[c.id]}</div>
-          </div>
-        ))}
+        {contestants.map((c) => {
+          const spotlightClass =
+            snapshot.activeContestantId === null
+              ? ''
+              : snapshot.activeContestantId === c.id
+                ? ' spotlight-active'
+                : ' spotlight-dim';
+          return (
+            <div key={c.id} style={scoreCardStyle(snapshot.activeContestantId === c.id)} className={spotlightClass.trim()}>
+              <div style={scoreCardIdStyle} className="spotlight-name">{c.name}</div>
+              <div style={scoreCardValueStyle}>{snapshot.scores[c.id]}</div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="stage-grid__ring">
@@ -177,14 +219,18 @@ function StageView({ gameId, vertical }: { gameId: string; vertical: boolean }) 
         {snapshot.timer && <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />}
         {snapshot.stealOpen && <div style={stealBannerStyle}>STEAL WINDOW</div>}
         {lifelineStatus && <div style={lifelineStatusStyle}>{lifelineStatus}</div>}
-        <KnowledgeRing
-          segments={segments}
-          ringState={ringState}
-          difficulty={snapshot.publicQuestion?.difficulty}
-          size={vertical ? 340 : 460}
-        />
-        {snapshot.publicQuestion && (
-          <p style={domainLineStyle}>{snapshot.publicQuestion.domain.replace(/_/g, ' ')}</p>
+        {snapshot.publicQuestion ? (
+          <div key={snapshot.publicQuestion.questionId} className={`broadcast-reveal ${themeClass}`}>
+            <KnowledgeRing
+              segments={segments}
+              ringState={ringState}
+              difficulty={snapshot.publicQuestion.difficulty}
+              size={vertical ? 340 : 460}
+            />
+            <p style={domainLineStyle}>{snapshot.publicQuestion.domain.replace(/_/g, ' ')}</p>
+          </div>
+        ) : (
+          <KnowledgeRing segments={segments} ringState={ringState} difficulty={undefined} size={vertical ? 340 : 460} />
         )}
       </div>
 
@@ -196,6 +242,13 @@ function StageView({ gameId, vertical }: { gameId: string; vertical: boolean }) 
           </div>
         </div>
       )}
+
+      <div className="broadcast-lowerthird">
+        <span className="broadcast-lowerthird__label">HOST</span>
+        <span key={hostLine} className="broadcast-lowerthird__line">
+          {hostLine}
+        </span>
+      </div>
     </div>
   );
 }
