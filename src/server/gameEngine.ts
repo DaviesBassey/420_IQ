@@ -52,6 +52,7 @@ interface FoldResult {
   confidenceUses: Record<string, number>; // non-CURIOUS uses per contestant
   scoreEvents: ScoreEvent[]; // synthesized ANSWER/STEAL events, in game order
   seenKeys: Set<string>;
+  stealRecorded: boolean; // one-shot guard: has a STEAL already landed for the current question?
 }
 
 // Pure reducer: folds the ordered event log into the derived game state.
@@ -62,6 +63,7 @@ function fold(events: GameEventRow[]): FoldResult {
   let lastAnswer: LockedAnswer | null = null;
   let pendingAnswer: LockedAnswer | null = null;
   let pendingSteal: { contestantId: string; choiceIndex: number; correct: boolean } | null = null;
+  let stealRecorded = false;
   const confidenceUses: Record<string, number> = {};
   const scoreEvents: ScoreEvent[] = [];
   const seenKeys = new Set<string>();
@@ -80,11 +82,13 @@ function fold(events: GameEventRow[]): FoldResult {
         difficulty: payload.difficulty,
       };
       pendingAnswer = lastAnswer;
+      stealRecorded = false; // new question round: steal eligibility resets
       if (payload.confidence !== 'CURIOUS') {
         confidenceUses[payload.contestantId] = (confidenceUses[payload.contestantId] ?? 0) + 1;
       }
     } else if (payload.kind === 'STEAL') {
       pendingSteal = { contestantId: payload.contestantId, choiceIndex: payload.choiceIndex, correct: payload.correct };
+      stealRecorded = true;
     } else if (payload.kind === 'TRANSITION') {
       if (ev.nextState === 'SCORE_COMMITTED') {
         if (pendingAnswer) {
@@ -108,7 +112,7 @@ function fold(events: GameEventRow[]): FoldResult {
     }
   }
 
-  return { state, questionIndex, lastAnswer, confidenceUses, scoreEvents, seenKeys };
+  return { state, questionIndex, lastAnswer, confidenceUses, scoreEvents, seenKeys, stealRecorded };
 }
 
 // Steal round opens in REVEAL only when the last answer was wrong AND the
@@ -131,6 +135,18 @@ function questionRefFor(
 }
 
 const LIFELINE_TYPES: LifelineType[] = ['TRUSTED_CIRCLE', 'SOURCE_SIGNAL'];
+
+// Whose turn it is: pure function of (contestants, state, questionIndex), so
+// it can be computed identically in snapshot() and in the turn-enforcement
+// checks inside lockAnswer/activateLifeline without duplicating the rule.
+function activeContestantIdFor(
+  contestants: { id: string; name: string }[],
+  state: GameState,
+  questionIndex: number,
+): string | null {
+  if (state === 'PRE_SHOW') return null;
+  return contestants[questionIndex % contestants.length].id;
+}
 
 export class GameEngine {
   constructor(private repos: Repos) {}
@@ -174,9 +190,7 @@ export class GameEngine {
       lifelines[c.id] = used;
     }
 
-    const activeContestantId = folded.state === 'PRE_SHOW'
-      ? null
-      : session.contestants[folded.questionIndex % session.contestants.length].id;
+    const activeContestantId = activeContestantIdFor(session.contestants, folded.state, folded.questionIndex);
 
     const confidence = CONFIDENCE_VISIBLE_STATES.includes(folded.state) ? (folded.lastAnswer?.confidence ?? null) : null;
 
@@ -204,9 +218,10 @@ export class GameEngine {
     if (!canTransition(folded.state, to)) throw new Error(`ILLEGAL_TRANSITION:${folded.state}->${to}`);
 
     const payload: EventPayload = { kind: 'TRANSITION', raw: callerPayload };
-    await this.repos.games.appendEvent({
+    const inserted = await this.repos.games.appendEvent({
       gameId, idempotencyKey, actor, prevState: folded.state, nextState: to, payloadJson: JSON.stringify(payload),
     });
+    if (!inserted && !folded.seenKeys.has(idempotencyKey)) throw new Error('IDEMPOTENCY_CONFLICT');
 
     if (to === 'COMPLETE' && session.mode === 'live') {
       await this.repos.games.markQuestionsUsed(pack.lanes.flat());
@@ -225,6 +240,9 @@ export class GameEngine {
       throw new Error(`ILLEGAL_TRANSITION:${folded.state}->ANSWER_LOCKED`);
     }
 
+    const activeContestantId = activeContestantIdFor(session.contestants, folded.state, folded.questionIndex);
+    if (contestantId !== activeContestantId) throw new Error('NOT_ACTIVE_CONTESTANT');
+
     if (confidence !== 'CURIOUS') {
       const used = folded.confidenceUses[contestantId] ?? 0;
       if (used + 1 > FORMAT_V1.maxConfidenceUses) throw new Error('CONFIDENCE_EXHAUSTED');
@@ -236,9 +254,10 @@ export class GameEngine {
     const correct = choiceIndex === qv.correctIndex;
 
     const payload: EventPayload = { kind: 'ANSWER_LOCKED', contestantId, choiceIndex, confidence, correct, difficulty: qv.difficulty };
-    await this.repos.games.appendEvent({
+    const inserted = await this.repos.games.appendEvent({
       gameId, idempotencyKey, actor: contestantId, prevState: folded.state, nextState: 'ANSWER_LOCKED', payloadJson: JSON.stringify(payload),
     });
+    if (!inserted && !folded.seenKeys.has(idempotencyKey)) throw new Error('IDEMPOTENCY_CONFLICT');
 
     const snap = await this.snapshot(gameId);
     bus.emit(`game:${gameId}`, snap);
@@ -250,6 +269,8 @@ export class GameEngine {
     if (folded.seenKeys.has(idempotencyKey)) return this.snapshot(gameId); // idempotent replay
 
     if (!computeStealOpen(folded.state, folded.lastAnswer)) throw new Error('STEAL_NOT_OPEN');
+    if (folded.stealRecorded) throw new Error('STEAL_NOT_AVAILABLE'); // one-shot: already stolen this question
+    if (contestantId === folded.lastAnswer?.contestantId) throw new Error('STEAL_NOT_AVAILABLE'); // no self-steal
 
     const { questionId } = questionRefFor(pack.lanes, session.contestants, folded.questionIndex);
     const qv = await this.repos.questions.latestVersion(questionId);
@@ -257,9 +278,10 @@ export class GameEngine {
     const correct = choiceIndex === qv.correctIndex;
 
     const payload: EventPayload = { kind: 'STEAL', contestantId, choiceIndex, correct };
-    await this.repos.games.appendEvent({
+    const inserted = await this.repos.games.appendEvent({
       gameId, idempotencyKey, actor: contestantId, prevState: folded.state, nextState: folded.state, payloadJson: JSON.stringify(payload),
     });
+    if (!inserted && !folded.seenKeys.has(idempotencyKey)) throw new Error('IDEMPOTENCY_CONFLICT');
 
     const snap = await this.snapshot(gameId);
     bus.emit(`game:${gameId}`, snap);
@@ -267,19 +289,23 @@ export class GameEngine {
   }
 
   async activateLifeline(gameId: string, contestantId: string, type: LifelineType, actor: string, idempotencyKey: string): Promise<GameSnapshot> {
-    const { folded } = await this.loadCore(gameId);
+    const { session, folded } = await this.loadCore(gameId);
     if (folded.seenKeys.has(idempotencyKey)) return this.snapshot(gameId); // idempotent replay
 
     if (!canTransition(folded.state, 'LIFELINE_ACTIVE')) {
       throw new Error(`ILLEGAL_TRANSITION:${folded.state}->LIFELINE_ACTIVE`);
     }
 
+    const activeContestantId = activeContestantIdFor(session.contestants, folded.state, folded.questionIndex);
+    if (contestantId !== activeContestantId) throw new Error('NOT_ACTIVE_CONTESTANT');
+
     await this.repos.games.recordLifelineUse(gameId, contestantId, type); // throws LIFELINE_ALREADY_USED
 
     const payload: EventPayload = { kind: 'LIFELINE_ACTIVATED', contestantId, type };
-    await this.repos.games.appendEvent({
+    const inserted = await this.repos.games.appendEvent({
       gameId, idempotencyKey, actor, prevState: folded.state, nextState: 'LIFELINE_ACTIVE', payloadJson: JSON.stringify(payload),
     });
+    if (!inserted && !folded.seenKeys.has(idempotencyKey)) throw new Error('IDEMPOTENCY_CONFLICT');
 
     const snap = await this.snapshot(gameId);
     bus.emit(`game:${gameId}`, snap);
@@ -310,9 +336,17 @@ export function getEngine(): GameEngine {
 // Shared error -> HTTP status mapping for the thin API routes.
 export function engineErrorStatus(err: unknown): number {
   if (err instanceof Error) {
-    if (err.message.startsWith('ILLEGAL_TRANSITION') || err.message === 'CONFIDENCE_EXHAUSTED' || err.message === 'LIFELINE_ALREADY_USED') {
+    if (
+      err.message.startsWith('ILLEGAL_TRANSITION')
+      || err.message === 'CONFIDENCE_EXHAUSTED'
+      || err.message === 'LIFELINE_ALREADY_USED'
+      || err.message === 'NOT_ACTIVE_CONTESTANT'
+      || err.message === 'STEAL_NOT_AVAILABLE'
+      || err.message === 'IDEMPOTENCY_CONFLICT'
+    ) {
       return 409;
     }
+    if (err.message.startsWith('PACK_NOT_FOUND')) return 404;
   }
   return 500;
 }

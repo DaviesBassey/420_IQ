@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getEngine } from '@/server/gameEngine';
+import { getEngine, engineErrorStatus } from '@/server/gameEngine';
 
 const bodySchema = z.object({
   packId: z.string(),
@@ -20,8 +20,12 @@ export async function POST(req: Request) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
 
-  const engine = getEngine();
-  const gameId = await engine.createGame(parsed.data.packId, parsed.data.mode, parsed.data.contestants);
-  const snapshot = await engine.snapshot(gameId);
-  return Response.json({ gameId, snapshot });
+  try {
+    const engine = getEngine();
+    const gameId = await engine.createGame(parsed.data.packId, parsed.data.mode, parsed.data.contestants);
+    const snapshot = await engine.snapshot(gameId);
+    return Response.json({ gameId, snapshot });
+  } catch (err) {
+    return Response.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: engineErrorStatus(err) });
+  }
 }

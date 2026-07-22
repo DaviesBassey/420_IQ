@@ -73,6 +73,46 @@ describe('GameEngine', () => {
     await engine.adjustScore(gameId, 'c1', 100, 'mis-scored Q3', 'exec', 'prod');
     expect((await engine.snapshot(gameId)).scores.c1).toBe(100);
   });
+  it('applies the same idempotencyKey across two different games without collision', async () => {
+    const { packId } = await generatePack(repos, { episodeId: 'e3', laneCount: 2, questionsPerLane: 6 });
+    await approvePack(repos, packId, 'ep');
+    const gameA = await engine.createGame(packId, 'live', CONTESTANTS);
+    const gameB = await engine.createGame(packId, 'live', CONTESTANTS);
+    const sA = await engine.transition(gameA, 'INTRO', 'prod', 'k1');
+    const sB = await engine.transition(gameB, 'INTRO', 'prod', 'k1');
+    expect(sA.state).toBe('INTRO');
+    expect(sB.state).toBe('INTRO');
+  });
+  it('rejects lockAnswer from a non-active contestant', async () => {
+    await toLiveQuestion();
+    await expect(engine.lockAnswer(gameId, 'c2', 0, 'CURIOUS', 'k4')).rejects.toThrow('NOT_ACTIVE_CONTESTANT');
+  });
+  it('rejects activateLifeline from a non-active contestant', async () => {
+    await toLiveQuestion();
+    await expect(engine.activateLifeline(gameId, 'c2', 'SOURCE_SIGNAL', 'prod', 'k4')).rejects.toThrow('NOT_ACTIVE_CONTESTANT');
+  });
+  it('rejects self-steal and enforces one-shot steal', async () => {
+    await toLiveQuestion();
+    const snap = await engine.snapshot(gameId);
+    const qv = await repos.questions.latestVersion(snap.publicQuestion!.questionId);
+    const wrongIndex = (qv!.correctIndex + 1) % qv!.choices.length;
+    await engine.lockAnswer(gameId, 'c1', wrongIndex, 'CERTAIN', 'k4'); // wrong + CERTAIN opens the steal window
+    const revealSnap = await engine.transition(gameId, 'REVEAL', 'prod', 'k5');
+    expect(revealSnap.stealOpen).toBe(true);
+
+    await expect(engine.recordSteal(gameId, 'c1', 0, 'k6')).rejects.toThrow('STEAL_NOT_AVAILABLE'); // self-steal
+    await engine.recordSteal(gameId, 'c2', 0, 'k7'); // opponent steal succeeds
+    await expect(engine.recordSteal(gameId, 'c2', 0, 'k8')).rejects.toThrow('STEAL_NOT_AVAILABLE'); // one-shot
+  });
+  it('rejects a steal after a correct answer (stealOpen stays false)', async () => {
+    await toLiveQuestion();
+    const snap = await engine.snapshot(gameId);
+    const qv = await repos.questions.latestVersion(snap.publicQuestion!.questionId);
+    await engine.lockAnswer(gameId, 'c1', qv!.correctIndex, 'CERTAIN', 'k4'); // correct answer
+    const revealSnap = await engine.transition(gameId, 'REVEAL', 'prod', 'k5');
+    expect(revealSnap.stealOpen).toBe(false);
+    await expect(engine.recordSteal(gameId, 'c2', 0, 'k6')).rejects.toThrow('STEAL_NOT_OPEN');
+  });
   it('rehearsal mode never marks questions used', async () => {
     const { packId } = await generatePack(repos, { episodeId: 'e2', laneCount: 2, questionsPerLane: 6 });
     await approvePack(repos, packId, 'ep');
