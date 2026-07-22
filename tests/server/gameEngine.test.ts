@@ -69,8 +69,8 @@ describe('GameEngine', () => {
       .rejects.toThrow('LIFELINE_ALREADY_USED');
   });
   it('rejects score adjustment without independent approver', async () => {
-    await expect(engine.adjustScore(gameId, 'c1', 100, 'fix', 'prod', 'prod')).rejects.toThrow();
-    await engine.adjustScore(gameId, 'c1', 100, 'mis-scored Q3', 'exec', 'prod');
+    await expect(engine.adjustScore(gameId, 'c1', 100, 'fix', 'prod', 'prod', 'adj1')).rejects.toThrow();
+    await engine.adjustScore(gameId, 'c1', 100, 'mis-scored Q3', 'exec', 'prod', 'adj2');
     expect((await engine.snapshot(gameId)).scores.c1).toBe(100);
   });
   it('applies the same idempotencyKey across two different games without collision', async () => {

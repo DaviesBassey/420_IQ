@@ -84,6 +84,21 @@ CREATE TABLE IF NOT EXISTS audit_events (
   detail TEXT NOT NULL,
   at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS trusted_contacts (
+  id TEXT PRIMARY KEY,
+  contestant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  consent_recorded_at TEXT NOT NULL,
+  available INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_signals (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  question_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  kind TEXT NOT NULL
+);
 `;
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;

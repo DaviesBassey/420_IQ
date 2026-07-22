@@ -107,6 +107,15 @@ export interface Repos {
     log(e: { actor: string; action: string; detail: string }): Promise<void>;
     list(): Promise<{ actor: string; action: string; detail: string; at: string }[]>;
   };
+  contacts: {
+    add(c: { contestantId: string; name: string; consentRecordedAt: string; available: boolean }): Promise<string>;
+    forContestant(contestantId: string): Promise<{ id: string; name: string; available: boolean }[]>;
+    setAvailability(id: string, available: boolean): Promise<void>;
+  };
+  signals: {
+    set(questionId: string, signals: { text: string; kind: 'VERIFIED' | 'UNRELIABLE' | 'DISTRACTOR' }[]): Promise<void>;
+    get(questionId: string): Promise<{ text: string; kind: string }[] | null>;
+  };
 }
 
 export function createRepos(dbPath: string): Repos {
@@ -391,5 +400,55 @@ export function createRepos(dbPath: string): Repos {
     },
   };
 
-  return { questions, packs, games, audit };
+  const contacts: Repos['contacts'] = {
+    async add(c) {
+      const id = randomUUID();
+      db.insert(schema.trustedContacts).values({
+        id,
+        contestantId: c.contestantId,
+        name: c.name,
+        consentRecordedAt: c.consentRecordedAt,
+        available: c.available ? 1 : 0,
+      }).run();
+      return id;
+    },
+
+    async forContestant(contestantId) {
+      const rows = await db
+        .select()
+        .from(schema.trustedContacts)
+        .where(eq(schema.trustedContacts.contestantId, contestantId));
+      return rows.map((row) => ({ id: row.id, name: row.name, available: row.available === 1 }));
+    },
+
+    async setAvailability(id, available) {
+      db.update(schema.trustedContacts).set({ available: available ? 1 : 0 }).where(eq(schema.trustedContacts.id, id)).run();
+    },
+  };
+
+  const signals: Repos['signals'] = {
+    async set(questionId, signalsIn) {
+      if (signalsIn.length !== 3) throw new Error('SIGNALS_MUST_BE_EXACTLY_THREE');
+      if (signalsIn.filter((s) => s.kind === 'VERIFIED').length !== 1) throw new Error('SIGNALS_MUST_HAVE_ONE_VERIFIED');
+      // Replace semantics: delete any previously stored signals for this
+      // question, then insert the new set, so re-seeding never leaves stale
+      // duplicate rows behind.
+      db.delete(schema.sourceSignals).where(eq(schema.sourceSignals.questionId, questionId)).run();
+      for (const s of signalsIn) {
+        db.insert(schema.sourceSignals).values({ questionId, text: s.text, kind: s.kind }).run();
+      }
+    },
+
+    async get(questionId) {
+      const rows = await db
+        .select()
+        .from(schema.sourceSignals)
+        .where(eq(schema.sourceSignals.questionId, questionId))
+        .orderBy(asc(schema.sourceSignals.seq));
+      if (rows.length === 0) return null;
+      return rows.map((row) => ({ text: row.text, kind: row.kind }));
+    },
+  };
+
+  return { questions, packs, games, audit, contacts, signals };
 }

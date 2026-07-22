@@ -149,7 +149,7 @@ function ContestantView({ n }: { n: string }) {
       {showConfidence && <div style={confidenceBadgeStyle}>{snapshot.confidence}</div>}
 
       {snapshot.publicQuestion ? (
-        <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={null} />
+        <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={snapshot.lockedChoice} />
       ) : (
         <p>No active question.</p>
       )}

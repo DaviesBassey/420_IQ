@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 420 IQ — Pilot Control System
 
-## Getting Started
+420 IQ is a knowledge-competition game show: contestants answer questions
+across eight domains (science, history, Africa/indigenous knowledge, law &
+policy, health & safety, culture & media, business ethics, future innovation)
+at escalating difficulty and stakes, with lifelines, confidence wagers, and a
+steal mechanic — the premise is that it tests *knowledge*, not consumption or
+trivia recall of pop culture. This repository is the local-first, offline,
+server-authoritative studio control system that runs a full episode taping on
+a single laptop or venue LAN: a question bank with an editorial workflow, a
+fairness-constrained pack builder, an event-sourced live game engine, a
+producer console, and host/contestant/stage displays, all pushed in real time
+over Server-Sent Events.
 
-First, run the development server:
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm i
+pnpm seed   # imports the prototype's 16 trivia questions as drafts + a labelled demo bank
+pnpm dev    # starts on http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The dev server uses a local SQLite file (`data/420iq.sqlite` by default,
+created on first run) — no external services, no internet access required at
+runtime.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All are optional; every one has a working default for local/rehearsal use.
+Set them (e.g. in a `.env.local`, or exported in the shell) before a real
+taping so the pilot doesn't run on default PINs and a fixed dev secret.
 
-## Learn More
+| Variable | Purpose | Default |
+|---|---|---|
+| `DB_PATH` | Path to the SQLite database file | `data/420iq.sqlite` |
+| `SESSION_SECRET` | HMAC secret signing the role session cookie | fixed dev secret (insecure — set this for anything beyond local rehearsal) |
+| `ROLE_PIN_PRODUCER` | PIN to claim the Producer role | `4200` |
+| `ROLE_PIN_HOST` | PIN to claim the Host role | `4201` |
+| `ROLE_PIN_CONTESTANT` | PIN to claim the Contestant role | `4202` |
+| `ROLE_PIN_STAGE` | PIN to claim the Stage role | `4203` |
+| `ROLE_PIN_EDITOR` | PIN to claim the Editor role | `4204` |
 
-To learn more about Next.js, take a look at the following resources:
+## Display URLs
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Each of these is a separate browser tab/device; open `/claim` first on each
+device to claim its role (PIN-gated) before navigating to the display itself.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| URL | Role | Purpose |
+|---|---|---|
+| `/claim` | — | Claim a device's role via PIN |
+| `/console` | Producer | Run-of-show controls: create games, drive state transitions, adjust scores |
+| `/editor` | Editor | Question authoring/review workflow, pack generation + approval |
+| `/host?game=<id>` | Host | Host monitor view |
+| `/contestant/1?game=<id>` | Contestant | Contestant 1's display (`/contestant/2` for the second, etc.) |
+| `/stage?game=<id>` | Stage | Audience/stage display — knowledge ring, scores, Knowledge Drop overlay |
 
-## Deploy on Vercel
+## Game-day quickstart
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. **Claim producer** at `/claim` on the console laptop (PIN from
+   `ROLE_PIN_PRODUCER`, default `4200`).
+2. **Editor:** at `/editor`, generate a pack for the episode (lane count,
+   questions per lane) and approve it once the fairness report looks right.
+3. **Console:** at `/console`, create a game from the approved pack, add
+   contestants, and step through the run-of-show controls.
+4. **Open the displays** on their respective devices (`/host`, `/contestant/1`,
+   `/contestant/2`, `/stage`), each appending `?game=<id>` for the game just
+   created.
+5. **Run the show** — every producer action pushes state to all connected
+   displays over SSE; the correct answer never reaches a contestant/stage
+   client before the producer transitions to `REVEAL`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Rehearsal vs. live:** create the game with `mode: 'rehearsal'` for run-throughs.
+Rehearsal games never mark questions as `USED`, so the same pack can be
+rehearsed repeatedly without burning through the question bank; use
+`mode: 'live'` only for the actual taping.
+
+## Tests
+
+```bash
+pnpm test       # unit + component tests (vitest)
+pnpm fairness   # 10,000-run pack-fairness simulation report
+pnpm e2e        # Playwright end-to-end game flow (starts its own dev server)
+```
+
+## Backup
+
+The entire game state lives in one SQLite file (`DB_PATH`, default
+`data/420iq.sqlite`). Before and during a taping, back it up by simply copying
+that file (e.g. `cp data/420iq.sqlite data/420iq.sqlite.bak-<timestamp>`) —
+there is no separate state to capture.
+
+## Further reading
+
+- `docs/superpowers/specs/2026-07-22-pilot-control-system-design.md` — full design spec
+- `docs/superpowers/plans/2026-07-22-pilot-control-system.md` — implementation plan
+- `docs/prototype/AUDIT.md` — audit of the prototype this system replaces
+- `docs/reports/fairness-report.md` — fairness simulation report

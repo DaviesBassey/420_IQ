@@ -77,7 +77,7 @@ function HostView({ gameId }: { gameId: string }) {
       <div style={stateBadgeStyle}>{snapshot.state}</div>
 
       {snapshot.publicQuestion ? (
-        <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={null} />
+        <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={snapshot.lockedChoice} />
       ) : (
         <p>No active question.</p>
       )}
