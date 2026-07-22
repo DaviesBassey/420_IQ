@@ -1,0 +1,21 @@
+:root {
+  --amber-deep: #D98E04;
+  --amber-bright: #FFB438;
+  --ultraviolet: #7B3BF2;
+  --violet-deep: #3D1E8F;
+  --graphite-900: #101318;
+  --graphite-700: #1C2129;
+  --graphite-500: #2E3642;
+  --offwhite: #F2EFE8;
+  --mineral-red: #C0452A;
+  --signal-green: #3FA66A;
+  --signal-red: #D4453A;
+  --ease-premium: cubic-bezier(0.2, 0, 0, 1);
+  --dur-micro: 160ms;
+  --dur-reveal: 400ms;
+  --dur-ceremony: 1200ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-micro: 0ms; --dur-reveal: 150ms; --dur-ceremony: 150ms; }
+}
+body { background: var(--graphite-900); color: var(--offwhite); }
