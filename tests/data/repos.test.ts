@@ -38,6 +38,20 @@ describe('question workflow', () => {
     const pool = await repos.questions.eligibleForPack('2026-07-22');
     expect(pool.map(p => p.questionId)).not.toContain(id2); // expired
   });
+  it('markQuestionsUsed only transitions APPROVED/LOCKED questions, leaving others unchanged', async () => {
+    const draftId = await repos.questions.create(qv());
+    const approvedId = await repos.questions.create(qv());
+    await repos.questions.setStatus(approvedId, 'EDITORIAL_REVIEW', 'editor');
+    await repos.questions.setStatus(approvedId, 'APPROVED', 'editor');
+
+    await repos.games.markQuestionsUsed([draftId, approvedId]);
+
+    const draftPool = await repos.questions.listByStatus('DRAFT');
+    const usedPool = await repos.questions.listByStatus('USED');
+    expect(draftPool.map(p => p.questionId)).toContain(draftId);
+    expect(usedPool.map(p => p.questionId)).toContain(approvedId);
+    expect(usedPool.map(p => p.questionId)).not.toContain(draftId);
+  });
 });
 
 describe('game events', () => {
@@ -48,11 +62,30 @@ describe('game events', () => {
     await repos.games.appendEvent(e);
     expect(await repos.games.events(g)).toHaveLength(1);
   });
+  it('is atomically idempotent under concurrent calls with the same idempotencyKey', async () => {
+    const g = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });
+    const e = { gameId: g, idempotencyKey: 'k-concurrent', actor: 'producer', prevState: 'PRE_SHOW', nextState: 'INTRO', payloadJson: '{}' };
+    const results = await Promise.allSettled([repos.games.appendEvent(e), repos.games.appendEvent(e)]);
+    expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+    expect(await repos.games.events(g)).toHaveLength(1);
+  });
   it('enforces one lifeline use per contestant per type', async () => {
     const g = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });
     await repos.games.recordLifelineUse(g, 'c1', 'TRUSTED_CIRCLE');
     await expect(repos.games.recordLifelineUse(g, 'c1', 'TRUSTED_CIRCLE')).rejects.toThrow('LIFELINE_ALREADY_USED');
     await repos.games.recordLifelineUse(g, 'c1', 'SOURCE_SIGNAL'); // other type still fine
+  });
+  it('resolves concurrent duplicate lifeline use to exactly one winner with a clean domain error', async () => {
+    const g = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });
+    const results = await Promise.allSettled([
+      repos.games.recordLifelineUse(g, 'c1', 'TRUSTED_CIRCLE'),
+      repos.games.recordLifelineUse(g, 'c1', 'TRUSTED_CIRCLE'),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason.message).toBe('LIFELINE_ALREADY_USED');
   });
   it('round-trips score events in order', async () => {
     const g = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });

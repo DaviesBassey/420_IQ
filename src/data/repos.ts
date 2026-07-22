@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { createDb, type Db } from './db';
 import * as schema from './schema';
 import type { QuestionVersionData, QuestionStatus, SessionMode, LifelineType } from '../domain/types';
@@ -273,11 +273,9 @@ export function createRepos(dbPath: string): Repos {
     },
 
     async appendEvent(e) {
-      const existing = await db
-        .select()
-        .from(schema.gameEvents)
-        .where(eq(schema.gameEvents.idempotencyKey, e.idempotencyKey));
-      if (existing.length > 0) return;
+      // Atomic idempotency: rely on the idempotency_key UNIQUE constraint and
+      // onConflictDoNothing rather than a check-then-insert, which has a race
+      // window between the SELECT and the INSERT under concurrent callers.
       const now = new Date().toISOString();
       db.insert(schema.gameEvents).values({
         gameId: e.gameId,
@@ -287,7 +285,7 @@ export function createRepos(dbPath: string): Repos {
         nextState: e.nextState,
         payloadJson: e.payloadJson,
         at: now,
-      }).run();
+      }).onConflictDoNothing().run();
     },
 
     async events(gameId) {
@@ -323,17 +321,18 @@ export function createRepos(dbPath: string): Repos {
     },
 
     async recordLifelineUse(gameId, contestantId, type) {
-      const existing = await db
-        .select()
-        .from(schema.lifelineUses)
-        .where(and(
-          eq(schema.lifelineUses.gameId, gameId),
-          eq(schema.lifelineUses.contestantId, contestantId),
-          eq(schema.lifelineUses.type, type),
-        ));
-      if (existing.length > 0) throw new Error('LIFELINE_ALREADY_USED');
+      // Atomic insert guarded by the (game_id, contestant_id, type) UNIQUE
+      // constraint: a check-then-insert has a race window under concurrent
+      // callers, so we insert first and inspect `changes` to detect a
+      // conflict, translating it into a domain error rather than leaking the
+      // raw driver's UNIQUE constraint message.
       const now = new Date().toISOString();
-      db.insert(schema.lifelineUses).values({ gameId, contestantId, type, at: now }).run();
+      const result = db
+        .insert(schema.lifelineUses)
+        .values({ gameId, contestantId, type, at: now })
+        .onConflictDoNothing()
+        .run();
+      if (result.changes === 0) throw new Error('LIFELINE_ALREADY_USED');
     },
 
     async lifelineUsed(gameId, contestantId, type) {
@@ -349,8 +348,17 @@ export function createRepos(dbPath: string): Repos {
     },
 
     async markQuestionsUsed(questionIds) {
+      // Invariant: only questions currently APPROVED or LOCKED may become
+      // USED (APPROVED -> LOCKED -> USED is the legal chain; this guarded
+      // UPDATE collapses both legal predecessor states in one step).
+      // Questions in any other status are left unchanged rather than thrown
+      // on — pack-level code already guarantees eligibility before this is
+      // called, so this is defense in depth, not the primary check.
       for (const id of questionIds) {
-        db.update(schema.questions).set({ status: 'USED' }).where(eq(schema.questions.id, id)).run();
+        db.update(schema.questions)
+          .set({ status: 'USED' })
+          .where(and(eq(schema.questions.id, id), inArray(schema.questions.status, ['APPROVED', 'LOCKED'])))
+          .run();
       }
     },
   };
