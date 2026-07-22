@@ -45,4 +45,15 @@ describe('generateLanes', () => {
     expect(() => generateLanes(makePool(10), { seed: 'a', laneCount: 2, questionsPerLane: 6 }, FORMAT_V1))
       .toThrow('POOL_TOO_SMALL');
   });
+  it('handles full episode scale (2 lanes x 17 questions) without violations', () => {
+    const pack = generateLanes(
+      makePool(150),
+      { seed: 'full-ep', laneCount: 2, questionsPerLane: 17 },
+      FORMAT_V1,
+    );
+    expect(pack.report.violations).toEqual([]);
+    expect(pack.lanes).toHaveLength(2);
+    expect(pack.lanes[0]).toHaveLength(17);
+    expect(pack.lanes[1]).toHaveLength(17);
+  });
 });

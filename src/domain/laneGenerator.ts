@@ -26,6 +26,14 @@ function repairLane(lane: Lane): Lane {
   return l;
 }
 
+// Hard cap on evaluateLanes calls per candidate, across all iterations of the
+// local search below. Bounds worst-case cost at production scale (2-3 lanes ×
+// 17 questions) so a pathological pool cannot hang the producer console. When
+// the budget runs out mid-search, the loop stops and returns the best lanes
+// found so far — those lanes simply fail validation for that candidate if
+// violations remain, same as if no improving swap had been found.
+const MAX_EVALS_PER_CANDIDATE = 20000;
+
 // Deterministic local-search repair: greedily swap two questions (within the
 // same lane, to fix ordering, or across lanes, to fix cross-lane balance)
 // whenever the swap strictly reduces the number of fairness violations. No
@@ -41,8 +49,11 @@ function localSearchRepair(
   maxIters = 500,
 ): { lanes: Lane[]; report: FairnessReport } {
   let current = lanes.map(l => [...l]);
+  let evalCount = 0;
   let report = evaluateLanes(current, cfg);
+  evalCount++;
 
+  outer:
   for (let iter = 0; iter < maxIters && report.violations.length > 0; iter++) {
     let improved = false;
     for (let a = 0; a < current.length && !improved; a++) {
@@ -50,9 +61,11 @@ function localSearchRepair(
         for (let i = 0; i < current[a].length && !improved; i++) {
           const jStart = b === a ? i + 1 : 0;
           for (let j = jStart; j < current[b].length && !improved; j++) {
+            if (evalCount >= MAX_EVALS_PER_CANDIDATE) break outer;
             const trial = current.map(l => [...l]);
             [trial[a][i], trial[b][j]] = [trial[b][j], trial[a][i]];
             const trialReport = evaluateLanes(trial, cfg);
+            evalCount++;
             if (trialReport.violations.length < report.violations.length) {
               current = trial;
               report = trialReport;
