@@ -4,10 +4,8 @@ import { requireRole } from '@/server/auth';
 
 const bodySchema = z.object({
   contestantId: z.string(),
-  delta: z.number(),
-  reason: z.string(),
-  approvedBy: z.string(),
-  actor: z.string(),
+  band: z.enum(['HOLD', 'RISE', 'REACH']),
+  choiceIndex: z.number().int().nonnegative(),
   idempotencyKey: z.string(),
 });
 
@@ -36,8 +34,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const snapshot = await getEngine().adjustScore(
-      id, parsed.data.contestantId, parsed.data.delta, parsed.data.reason, parsed.data.approvedBy, parsed.data.actor, parsed.data.idempotencyKey,
+    const snapshot = await getEngine().lockFinal(
+      id, parsed.data.contestantId, parsed.data.band, parsed.data.choiceIndex, parsed.data.idempotencyKey,
     );
     return Response.json(snapshot);
   } catch (err) {

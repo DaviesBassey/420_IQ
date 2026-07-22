@@ -78,3 +78,18 @@ export const auditEvents = sqliteTable('audit_events', {
   detail: text('detail').notNull(),
   at: text('at').notNull(),
 });
+
+export const trustedContacts = sqliteTable('trusted_contacts', {
+  id: text('id').primaryKey(),
+  contestantId: text('contestant_id').notNull(),
+  name: text('name').notNull(),
+  consentRecordedAt: text('consent_recorded_at').notNull(),
+  available: integer('available').notNull(), // 0/1 — no boolean mode used elsewhere in this schema
+});
+
+export const sourceSignals = sqliteTable('source_signals', {
+  seq: integer('seq').primaryKey({ autoIncrement: true }),
+  questionId: text('question_id').notNull(),
+  text: text('text').notNull(),
+  kind: text('kind').notNull(), // 'VERIFIED' | 'UNRELIABLE' | 'DISTRACTOR'
+});

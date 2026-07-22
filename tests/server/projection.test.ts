@@ -4,9 +4,10 @@ import type { GameSnapshot } from '@/server/gameEngine';
 
 const base = (over: Partial<GameSnapshot>): GameSnapshot => ({
   gameId: 'g', state: 'QUESTION_READY', mode: 'live', questionIndex: 0,
-  activeContestantId: 'c1', scores: { c1: 0 }, lifelines: { c1: { TRUSTED_CIRCLE: false, SOURCE_SIGNAL: false } },
+  activeContestantId: 'c1', contestants: [{ id: 'c1', name: 'Ada' }],
+  scores: { c1: 0 }, lifelines: { c1: { TRUSTED_CIRCLE: false, SOURCE_SIGNAL: false } },
   publicQuestion: { questionId: 'q', domain: 'SCIENCE', difficulty: 'INFERNO', stem: 's', choices: ['a','b'], knowledgeDropAvailable: false },
-  reveal: null, confidence: null, stealOpen: false, ...over,
+  reveal: null, confidence: null, stealOpen: false, lockedChoice: null, timer: null, lifelineDetail: null, ...over,
 });
 
 describe('projectForRole', () => {

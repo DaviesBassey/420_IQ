@@ -242,6 +242,11 @@ export function GameControls({ gameId }: { gameId: string }) {
   const [adjApprovedBy, setAdjApprovedBy] = useState('');
 
   const contestantIds = useMemo(() => (snapshot ? Object.keys(snapshot.scores) : []), [snapshot]);
+  const nameById = useMemo(
+    () => Object.fromEntries((snapshot?.contestants ?? []).map((c) => [c.id, c.name])),
+    [snapshot],
+  );
+  const nameFor = (cid: string) => nameById[cid] ?? cid;
   const effectiveLockContestantId = lockContestantId || snapshot?.activeContestantId || contestantIds[0] || '';
   const effectiveAdjContestantId = adjContestantId || contestantIds[0] || '';
 
@@ -302,6 +307,7 @@ export function GameControls({ gameId }: { gameId: string }) {
         reason: adjReason,
         approvedBy: adjApprovedBy,
         actor: ACTOR,
+        idempotencyKey: crypto.randomUUID(),
       });
       setAdjReason('');
       setAdjApprovedBy('');
@@ -362,7 +368,7 @@ export function GameControls({ gameId }: { gameId: string }) {
           {contestantIds.map((cid) => (
             <div key={cid} style={contestantCardStyle}>
               <div style={{ fontWeight: 600 }}>
-                {cid}
+                {nameFor(cid)}
                 {snapshot.activeContestantId === cid ? ' (active)' : ''}
               </div>
               <div>Score: {snapshot.scores[cid]}</div>
@@ -432,7 +438,7 @@ export function GameControls({ gameId }: { gameId: string }) {
           <h2 style={sectionTitleStyle}>Lifelines</h2>
           {contestantIds.map((cid) => (
             <div key={cid} style={buttonRowStyle}>
-              <span style={{ fontSize: '0.8rem', marginRight: '0.25rem', alignSelf: 'center' }}>{cid}:</span>
+              <span style={{ fontSize: '0.8rem', marginRight: '0.25rem', alignSelf: 'center' }}>{nameFor(cid)}:</span>
               {LIFELINE_TYPES.map((type) => (
                 <button
                   key={type}
@@ -456,7 +462,7 @@ export function GameControls({ gameId }: { gameId: string }) {
             onChange={(e) => setLockContestantId(e.target.value)}
           >
             {contestantIds.map((cid) => (
-              <option key={cid} value={cid}>{cid}</option>
+              <option key={cid} value={cid}>{nameFor(cid)}</option>
             ))}
           </select>
 
@@ -498,7 +504,7 @@ export function GameControls({ gameId }: { gameId: string }) {
                 onChange={(e) => setAdjContestantId(e.target.value)}
               >
                 {contestantIds.map((cid) => (
-                  <option key={cid} value={cid}>{cid}</option>
+                  <option key={cid} value={cid}>{nameFor(cid)}</option>
                 ))}
               </select>
 

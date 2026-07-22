@@ -189,7 +189,7 @@ function buildDemoBank(): (QuestionVersionData & { status: 'APPROVED' })[] {
         ],
         correctIndex,
         explanation: `This is a labelled demo explanation for ${domain} question ${n}.`,
-        knowledgeDrop: null,
+        knowledgeDrop: `[DEMO] Knowledge Drop: one surprising verified fact about ${domain} question ${n}.`,
         sourceTitle: 'Demo bank (generated)',
         sourceUrl: 'internal://demo-bank',
         correctAsOf: '2026-07-21',
@@ -213,6 +213,21 @@ function capitalize(s: string): string {
 
 export const DEMO_BANK: (QuestionVersionData & { status: 'APPROVED' })[] = buildDemoBank();
 
+// Three demo Source Signal entries for a DEMO_BANK question (Task 21): the
+// VERIFIED signal restates the correct choice's fact so the lifeline has a
+// genuinely correct answer to surface; the other two are clearly-labelled
+// demo text per the brief (labelled '[DEMO]' throughout, same convention as
+// the rest of buildDemoBank's stems/explanations).
+function demoSignalsFor(q: QuestionVersionData): { text: string; kind: 'VERIFIED' | 'UNRELIABLE' | 'DISTRACTOR' }[] {
+  const topicNumber = q.factKey.split('-').pop();
+  const topic = `${q.domain} question ${topicNumber}`;
+  return [
+    { text: `[DEMO] Verified: ${q.choices[q.correctIndex]}.`, kind: 'VERIFIED' },
+    { text: `[DEMO] A commonly repeated but unreliable belief about ${topic}.`, kind: 'UNRELIABLE' },
+    { text: `[DEMO] A plausible but wrong signal about ${topic}.`, kind: 'DISTRACTOR' },
+  ];
+}
+
 export async function seedDatabase(repos: Repos): Promise<{ imported: number; demo: number }> {
   let imported = 0;
   for (const q of PROTOTYPE_QUESTIONS) {
@@ -230,6 +245,7 @@ export async function seedDatabase(repos: Repos): Promise<{ imported: number; de
     // questions carry expiresAt so they pass the tier-3 approval gate without
     // needing a COUNCIL_REVIEW hop.
     await repos.questions.setStatus(id, 'APPROVED', 'seed-script');
+    await repos.signals.set(id, demoSignalsFor(q));
     demo += 1;
   }
 

@@ -3,7 +3,7 @@
 // every field is copied explicitly so a spread can never accidentally leak
 // `reveal` or an un-masked `difficulty` to a role that shouldn't have it.
 
-import type { GameSnapshot } from '@/server/gameEngine';
+import type { GameSnapshot, LifelineDetail } from '@/server/gameEngine';
 import type { PublicQuestion, RevealPayload } from '@/domain/publicQuestion';
 import type { Role } from '@/server/auth';
 
@@ -17,6 +17,14 @@ const REVEAL_VISIBLE_STATES: GameSnapshot['state'][] = ['REVEAL', 'KNOWLEDGE_DRO
 // gameId -> display hold flag. Producer-controlled; consulted by the stream
 // route on connect and re-emit, and flipped by the hold route.
 export const holdFlags = new Map<string, boolean>();
+
+function copyLifelineDetail(detail: LifelineDetail): LifelineDetail {
+  if (!detail) return null;
+  if (detail.type === 'SOURCE_SIGNAL') {
+    return { type: 'SOURCE_SIGNAL', signals: detail.signals.map((s) => ({ ...s })), verifiedIndex: detail.verifiedIndex };
+  }
+  return { ...detail };
+}
 
 function projectPublicQuestion(pq: PublicQuestion | null, role: Role, state: GameSnapshot['state']): PublicQuestion | null {
   if (!pq) return null;
@@ -40,6 +48,7 @@ export function projectForRole(snap: GameSnapshot, role: Role, hold: boolean): P
     mode: snap.mode,
     questionIndex: snap.questionIndex,
     activeContestantId: snap.activeContestantId,
+    contestants: snap.contestants.map((c) => ({ ...c })),
     scores: { ...snap.scores },
     lifelines: Object.fromEntries(
       Object.entries(snap.lifelines).map(([id, used]) => [id, { ...used }]),
@@ -48,6 +57,9 @@ export function projectForRole(snap: GameSnapshot, role: Role, hold: boolean): P
     reveal: revealVisible && snap.reveal ? { ...snap.reveal, choices: Array.isArray(snap.reveal.choices) ? [...snap.reveal.choices] : snap.reveal.choices } : null,
     confidence: snap.confidence,
     stealOpen: snap.stealOpen,
+    lockedChoice: snap.lockedChoice,
+    timer: snap.timer ? { ...snap.timer } : null,
+    lifelineDetail: copyLifelineDetail(snap.lifelineDetail),
     hold,
   };
 }

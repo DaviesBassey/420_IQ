@@ -3,10 +3,7 @@ import { getEngine, engineErrorStatus } from '@/server/gameEngine';
 import { requireRole } from '@/server/auth';
 
 const bodySchema = z.object({
-  contestantId: z.string(),
-  delta: z.number(),
-  reason: z.string(),
-  approvedBy: z.string(),
+  phase: z.enum(['ADVICE', 'LOCK']),
   actor: z.string(),
   idempotencyKey: z.string(),
 });
@@ -36,9 +33,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const snapshot = await getEngine().adjustScore(
-      id, parsed.data.contestantId, parsed.data.delta, parsed.data.reason, parsed.data.approvedBy, parsed.data.actor, parsed.data.idempotencyKey,
-    );
+    const snapshot = await getEngine().advanceCirclePhase(id, parsed.data.phase, parsed.data.actor, parsed.data.idempotencyKey);
     return Response.json(snapshot);
   } catch (err) {
     return Response.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: engineErrorStatus(err) });
