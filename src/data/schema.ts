@@ -55,7 +55,7 @@ export const gameEvents = sqliteTable('game_events', {
   nextState: text('next_state').notNull(),
   payloadJson: text('payload_json').notNull(),
   at: text('at').notNull(),
-}, (t) => [unique().on(t.idempotencyKey)]);
+}, (t) => [unique().on(t.gameId, t.idempotencyKey)]);
 
 export const scoreEvents = sqliteTable('score_events', {
   seq: integer('seq').primaryKey({ autoIncrement: true }),

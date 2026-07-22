@@ -1,15 +1,11 @@
 import { z } from 'zod';
-import { TRANSITIONS, type GameState } from '@/domain/fsm';
-import { getEngine, engineErrorStatus } from '@/server/gameEngine';
+import { getEngine } from '@/server/gameEngine';
 import { requireRole } from '@/server/auth';
-
-const GAME_STATES = Object.keys(TRANSITIONS) as [GameState, ...GameState[]];
+import { holdFlags } from '@/server/projection';
+import { bus } from '@/server/bus';
 
 const bodySchema = z.object({
-  to: z.enum(GAME_STATES),
-  actor: z.string(),
-  idempotencyKey: z.string(),
-  payload: z.unknown().optional(),
+  on: z.boolean(),
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -36,10 +32,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
 
-  try {
-    const snapshot = await getEngine().transition(id, parsed.data.to, parsed.data.actor, parsed.data.idempotencyKey, parsed.data.payload);
-    return Response.json(snapshot);
-  } catch (err) {
-    return Response.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: engineErrorStatus(err) });
-  }
+  holdFlags.set(id, parsed.data.on);
+
+  const snap = await getEngine().snapshot(id);
+  bus.emit(`game:${id}`, snap);
+
+  return Response.json({ ok: true, hold: parsed.data.on });
 }

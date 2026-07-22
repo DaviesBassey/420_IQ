@@ -53,12 +53,13 @@ CREATE TABLE IF NOT EXISTS game_sessions (
 CREATE TABLE IF NOT EXISTS game_events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   game_id TEXT NOT NULL,
-  idempotency_key TEXT NOT NULL UNIQUE,
+  idempotency_key TEXT NOT NULL,
   actor TEXT NOT NULL,
   prev_state TEXT NOT NULL,
   next_state TEXT NOT NULL,
   payload_json TEXT NOT NULL,
-  at TEXT NOT NULL
+  at TEXT NOT NULL,
+  UNIQUE (game_id, idempotency_key)
 );
 
 CREATE TABLE IF NOT EXISTS score_events (

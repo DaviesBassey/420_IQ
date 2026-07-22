@@ -67,7 +67,20 @@ describe('game events', () => {
     const e = { gameId: g, idempotencyKey: 'k-concurrent', actor: 'producer', prevState: 'PRE_SHOW', nextState: 'INTRO', payloadJson: '{}' };
     const results = await Promise.allSettled([repos.games.appendEvent(e), repos.games.appendEvent(e)]);
     expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+    const values = (results as PromiseFulfilledResult<boolean>[]).map((r) => r.value);
+    expect(values.filter((v) => v === true)).toHaveLength(1); // exactly one insert won
+    expect(values.filter((v) => v === false)).toHaveLength(1); // the other saw the conflict no-op
     expect(await repos.games.events(g)).toHaveLength(1);
+  });
+  it('scopes idempotency_key uniqueness to (game_id, idempotency_key): the same key in two different games both insert', async () => {
+    const gA = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });
+    const gB = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });
+    const eA = { gameId: gA, idempotencyKey: 'shared-key', actor: 'producer', prevState: 'PRE_SHOW', nextState: 'INTRO', payloadJson: '{}' };
+    const eB = { gameId: gB, idempotencyKey: 'shared-key', actor: 'producer', prevState: 'PRE_SHOW', nextState: 'INTRO', payloadJson: '{}' };
+    expect(await repos.games.appendEvent(eA)).toBe(true);
+    expect(await repos.games.appendEvent(eB)).toBe(true);
+    expect(await repos.games.events(gA)).toHaveLength(1);
+    expect(await repos.games.events(gB)).toHaveLength(1);
   });
   it('enforces one lifeline use per contestant per type', async () => {
     const g = await repos.games.create({ packId: 'p', mode: 'live', contestants: [{ id: 'c1', name: 'A' }] });

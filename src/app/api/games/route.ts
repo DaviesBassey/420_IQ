@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { getEngine } from '@/server/gameEngine';
+import { getEngine, engineErrorStatus } from '@/server/gameEngine';
+import { requireRole } from '@/server/auth';
 
 const bodySchema = z.object({
   packId: z.string(),
@@ -8,6 +9,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
+  try {
+    await requireRole(req, ['producer']);
+  } catch (err) {
+    if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+      return Response.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+    throw err;
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -20,8 +30,12 @@ export async function POST(req: Request) {
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
 
-  const engine = getEngine();
-  const gameId = await engine.createGame(parsed.data.packId, parsed.data.mode, parsed.data.contestants);
-  const snapshot = await engine.snapshot(gameId);
-  return Response.json({ gameId, snapshot });
+  try {
+    const engine = getEngine();
+    const gameId = await engine.createGame(parsed.data.packId, parsed.data.mode, parsed.data.contestants);
+    const snapshot = await engine.snapshot(gameId);
+    return Response.json({ gameId, snapshot });
+  } catch (err) {
+    return Response.json({ error: err instanceof Error ? err.message : 'Internal error' }, { status: engineErrorStatus(err) });
+  }
 }

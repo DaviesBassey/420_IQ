@@ -2,15 +2,15 @@ import { z } from 'zod';
 import { getEngine, engineErrorStatus } from '@/server/gameEngine';
 import { requireRole } from '@/server/auth';
 
-const typeSchema = z.enum(['TRUSTED_CIRCLE', 'SOURCE_SIGNAL']);
-
 const bodySchema = z.object({
   contestantId: z.string(),
+  delta: z.number(),
+  reason: z.string(),
+  approvedBy: z.string(),
   actor: z.string(),
-  idempotencyKey: z.string(),
 });
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string; type: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireRole(req, ['producer']);
   } catch (err) {
@@ -20,12 +20,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     throw err;
   }
 
-  const { id, type } = await params;
-
-  const parsedType = typeSchema.safeParse(type);
-  if (!parsedType.success) {
-    return Response.json({ error: parsedType.error.message }, { status: 400 });
-  }
+  const { id } = await params;
 
   let body: unknown;
   try {
@@ -40,8 +35,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   try {
-    const snapshot = await getEngine().activateLifeline(
-      id, parsed.data.contestantId, parsedType.data, parsed.data.actor, parsed.data.idempotencyKey,
+    const snapshot = await getEngine().adjustScore(
+      id, parsed.data.contestantId, parsed.data.delta, parsed.data.reason, parsed.data.approvedBy, parsed.data.actor,
     );
     return Response.json(snapshot);
   } catch (err) {

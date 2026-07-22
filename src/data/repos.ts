@@ -94,7 +94,7 @@ export interface Repos {
   games: {
     create(g: { packId: string; mode: SessionMode; contestants: { id: string; name: string }[] }): Promise<string>;
     get(gameId: string): Promise<GameSessionRow | null>;
-    appendEvent(e: GameEventInsert): Promise<void>;
+    appendEvent(e: GameEventInsert): Promise<boolean>;
     events(gameId: string): Promise<GameEventRow[]>;
     appendScoreEvent(gameId: string, ev: ScoreEvent): Promise<void>;
     scoreEvents(gameId: string): Promise<ScoreEvent[]>;
@@ -273,11 +273,13 @@ export function createRepos(dbPath: string): Repos {
     },
 
     async appendEvent(e) {
-      // Atomic idempotency: rely on the idempotency_key UNIQUE constraint and
-      // onConflictDoNothing rather than a check-then-insert, which has a race
-      // window between the SELECT and the INSERT under concurrent callers.
+      // Atomic idempotency: rely on the (game_id, idempotency_key) UNIQUE
+      // constraint and onConflictDoNothing rather than a check-then-insert,
+      // which has a race window between the SELECT and the INSERT under
+      // concurrent callers. Returns true when the row was inserted, false
+      // when the insert was a no-op due to conflict (same game + key).
       const now = new Date().toISOString();
-      db.insert(schema.gameEvents).values({
+      const result = db.insert(schema.gameEvents).values({
         gameId: e.gameId,
         idempotencyKey: e.idempotencyKey,
         actor: e.actor,
@@ -286,6 +288,7 @@ export function createRepos(dbPath: string): Repos {
         payloadJson: e.payloadJson,
         at: now,
       }).onConflictDoNothing().run();
+      return result.changes > 0;
     },
 
     async events(gameId) {

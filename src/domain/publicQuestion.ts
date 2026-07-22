@@ -1,7 +1,7 @@
 import type { Domain, Difficulty, QuestionVersionData } from './types';
 
 export interface PublicQuestion {
-  questionId: string; domain: Domain; difficulty: Difficulty;
+  questionId: string; domain: Domain; difficulty: Difficulty | 'HIDDEN';
   stem: string; choices: string[]; knowledgeDropAvailable: boolean;
 }
 
