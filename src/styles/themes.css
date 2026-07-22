@@ -1,0 +1,45 @@
+/* Category (domain) themes for QuestionCard.
+   Each class sets --cat-accent (used for the card border/label color) plus a
+   subtle secondary edge treatment (box-shadow inset ring or gradient border)
+   per the design spec's per-domain palette table. Only design tokens from
+   tokens.css are referenced — no hardcoded hex values here. */
+
+.theme-SCIENCE {
+  --cat-accent: var(--ultraviolet);
+  box-shadow: inset 0 0 0 1px var(--offwhite);
+}
+
+.theme-HISTORY {
+  --cat-accent: var(--amber-deep);
+  box-shadow: inset 0 0 0 1px var(--amber-bright);
+}
+
+.theme-LAW_POLICY {
+  --cat-accent: var(--graphite-500);
+  box-shadow: inset 0 0 0 1px var(--offwhite), inset 0 -3px 0 var(--amber-deep);
+}
+
+.theme-HEALTH_SAFETY {
+  --cat-accent: var(--offwhite);
+  box-shadow: inset 0 0 0 1px var(--violet-deep);
+}
+
+.theme-CULTURE_MEDIA {
+  --cat-accent: var(--ultraviolet);
+  box-shadow: inset 0 -3px 0 var(--amber-bright);
+}
+
+.theme-BUSINESS_ETHICS {
+  --cat-accent: var(--graphite-500);
+  box-shadow: inset 0 -3px 0 var(--amber-deep);
+}
+
+.theme-AFRICA_INDIGENOUS {
+  --cat-accent: var(--amber-deep);
+  box-shadow: inset 0 -3px 0 var(--mineral-red), inset 0 3px 0 var(--ultraviolet);
+}
+
+.theme-FUTURE_INNOVATION {
+  --cat-accent: var(--ultraviolet);
+  border-image: linear-gradient(90deg, var(--ultraviolet), var(--offwhite)) 1;
+}

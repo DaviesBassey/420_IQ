@@ -1,0 +1,42 @@
+/* Stage display layout.
+   Default: a widescreen composition — a compact scoreboard ribbon across the
+   top, the KnowledgeRing filling the remaining space below.
+   ?aspect=916 (vertical/portrait broadcast overlay): rows flip so the ring
+   takes the dominant top area and the ribbon pins to the bottom, matching
+   how portrait score tickers are typically composed. */
+
+.stage-grid {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "ribbon" "ring";
+  background: var(--graphite-900);
+  color: var(--offwhite);
+  padding: 1.5rem 2rem;
+  gap: 1.5rem;
+}
+
+.stage-grid--vertical {
+  grid-template-rows: 1fr auto;
+  grid-template-areas: "ring" "ribbon";
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.stage-grid__ribbon {
+  grid-area: ribbon;
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.stage-grid__ring {
+  grid-area: ring;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  position: relative;
+}
