@@ -59,4 +59,10 @@ describe('evaluateLanes', () => {
     const r = evaluateLanes([l1, l2], FORMAT_V1);
     expect(r.violations.some(v => v.includes('domain'))).toBe(true);
   });
+  it('flags mean reading-time imbalance beyond ±20%', () => {
+    const slow = balancedLane('HISTORY').map(x => ({ ...x, readTimeSec: 30 }));
+    const fast = balancedLane('HISTORY');
+    const r = evaluateLanes([slow, fast], FORMAT_V1);
+    expect(r.violations.some(v => v.includes('reading time'))).toBe(true);
+  });
 });
