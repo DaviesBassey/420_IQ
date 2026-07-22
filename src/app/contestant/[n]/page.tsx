@@ -196,7 +196,7 @@ function ContestantView({ n }: { n: string }) {
           <ul style={signalListStyle}>
             {signalDetail.signals.map((s, idx) => (
               <li key={idx} style={signalItemStyle(signalDetail.verifiedIndex === idx)}>
-                {s.text}
+                {signalDetail.verifiedIndex === idx ? '✓ VERIFIED — ' : ''}{s.text}
               </li>
             ))}
           </ul>

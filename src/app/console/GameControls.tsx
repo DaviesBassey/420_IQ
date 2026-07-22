@@ -275,7 +275,7 @@ export function GameControls({ gameId }: { gameId: string }) {
   // whichever other contestant id exists.
   const nonActiveContestantId = contestantIds.find((cid) => cid !== snapshot?.activeContestantId) ?? contestantIds[0] ?? '';
   const effectiveStealContestantId = stealContestantId || nonActiveContestantId;
-  const effectiveFinalContestantId = finalContestantId || contestantIds[0] || '';
+  const effectiveFinalContestantId = finalContestantId || snapshot?.activeContestantId || contestantIds[0] || '';
 
   if (!snapshot) {
     return (
