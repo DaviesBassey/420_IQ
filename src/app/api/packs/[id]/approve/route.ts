@@ -31,6 +31,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ error: parsed.error.message }, { status: 400 });
   }
 
-  const result = await approvePack(getRepos(), id, parsed.data.approver);
-  return Response.json(result);
+  try {
+    const result = await approvePack(getRepos(), id, parsed.data.approver);
+    return Response.json(result);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Pack not found')) {
+      return Response.json({ error: err.message }, { status: 404 });
+    }
+    throw err;
+  }
 }
