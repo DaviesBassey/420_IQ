@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { eq, and, asc, inArray } from 'drizzle-orm';
+import { eq, and, asc, desc, inArray } from 'drizzle-orm';
 import { createDb, type Db } from './db';
 import * as schema from './schema';
 import type { QuestionVersionData, QuestionStatus, SessionMode, LifelineType } from '../domain/types';
@@ -90,6 +90,7 @@ export interface Repos {
     create(p: { episodeId: string; seed: string; lanes: string[][]; reportJson: string }): Promise<string>;
     approve(packId: string, approver: string): Promise<{ checksum: string }>;
     get(packId: string): Promise<{ id: string; episodeId: string; seed: string; lanes: string[][]; approvedBy: string | null; checksum: string | null; reportJson: string } | null>;
+    list(): Promise<{ id: string; episodeId: string; seed: string; approvedBy: string | null; checksum: string | null; createdAt: string }[]>;
   };
   games: {
     create(g: { packId: string; mode: SessionMode; contestants: { id: string; name: string }[] }): Promise<string>;
@@ -242,6 +243,18 @@ export function createRepos(dbPath: string): Repos {
         checksum: row.checksum,
         reportJson: row.reportJson,
       };
+    },
+
+    async list() {
+      const rows = await db.select().from(schema.packs).orderBy(desc(schema.packs.createdAt));
+      return rows.map((row) => ({
+        id: row.id,
+        episodeId: row.episodeId,
+        seed: row.seed,
+        approvedBy: row.approvedBy,
+        checksum: row.checksum,
+        createdAt: row.createdAt,
+      }));
     },
   };
 
