@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useGameStream } from '@/components/useGameStream';
 import { QuestionCard } from '@/components/QuestionCard';
 import { HoldScreen } from '@/components/HoldScreen';
+import { TimerChip } from '@/components/TimerChip';
 import type { LifelineType } from '@/domain/types';
 
 const LIFELINE_LABELS: Record<LifelineType, string> = {
@@ -88,6 +89,43 @@ const confidenceBadgeStyle: CSSProperties = {
   letterSpacing: '0.04em',
 };
 
+const stealBannerStyle: CSSProperties = {
+  alignSelf: 'flex-start',
+  padding: '0.5rem 1rem',
+  borderRadius: '999px',
+  background: 'var(--signal-red)',
+  color: 'var(--offwhite)',
+  fontWeight: 700,
+  fontSize: '0.95rem',
+  letterSpacing: '0.06em',
+};
+
+const lifelinePanelStyle: CSSProperties = {
+  background: 'var(--graphite-700)',
+  border: '1px solid var(--graphite-500)',
+  borderRadius: '10px',
+  padding: '1rem 1.25rem',
+  fontFamily: 'var(--font-ui)',
+};
+
+const signalListStyle: CSSProperties = {
+  listStyle: 'none',
+  padding: 0,
+  margin: '0.5rem 0 0',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.5rem',
+};
+
+function signalItemStyle(highlighted: boolean): CSSProperties {
+  return {
+    padding: '0.6rem 0.85rem',
+    borderRadius: '8px',
+    border: `2px solid ${highlighted ? 'var(--amber-bright)' : 'var(--graphite-500)'}`,
+    background: 'var(--graphite-900)',
+  };
+}
+
 function ContestantView({ n }: { n: string }) {
   const searchParams = useSearchParams();
   const gameId = searchParams.get('game');
@@ -100,15 +138,13 @@ function ContestantView({ n }: { n: string }) {
     return <div style={waitingStyle}>Waiting for game {gameId}…</div>;
   }
 
-  // Contestant slot mapping: ProjectedSnapshot has no notion of a positional
-  // "contestant N" — it only exposes a scores map keyed by contestantId. The
-  // [n] route param (1-based, matching the /contestant/1, /contestant/2
-  // display links the console hands out) is mapped onto contestant ids by
-  // sorting the scores keys and indexing into that sorted list. This is
-  // stable across renders (scores keys don't change once the game starts)
-  // but is a documented simplification: it assumes contestant ids sort in
-  // the order the producer intends to badge them as "1" and "2".
-  const contestantIds = Object.keys(snapshot.scores).sort();
+  // Contestant slot mapping: the [n] route param (1-based, matching the
+  // /contestant/1, /contestant/2 display links the console hands out) is
+  // mapped onto contestant ids by indexing into snapshot.contestants, which
+  // preserves the producer's actual createGame array order — not a sort of
+  // the scores map's keys (which is an unordered object with no guaranteed
+  // relationship to that order).
+  const contestantIds = snapshot.contestants.map((c) => c.id);
   const index = Number(n) - 1;
   const contestantId = contestantIds[index];
 
@@ -128,6 +164,8 @@ function ContestantView({ n }: { n: string }) {
   // NEXT_QUESTION), so gating the badge on activeContestantId === this
   // contestant's id correctly attributes it instead of showing it to both.
   const showConfidence = snapshot.confidence && snapshot.activeContestantId === contestantId;
+  const signalDetail = snapshot.lifelineDetail?.type === 'SOURCE_SIGNAL' ? snapshot.lifelineDetail : null;
+  const circleDetail = snapshot.lifelineDetail?.type === 'TRUSTED_CIRCLE' ? snapshot.lifelineDetail : null;
 
   return (
     <div style={pageStyle}>
@@ -146,7 +184,37 @@ function ContestantView({ n }: { n: string }) {
         ))}
       </div>
 
+      {snapshot.timer && <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />}
+
+      {snapshot.stealOpen && <div style={stealBannerStyle}>STEAL WINDOW</div>}
+
       {showConfidence && <div style={confidenceBadgeStyle}>{snapshot.confidence}</div>}
+
+      {signalDetail && (
+        <section style={lifelinePanelStyle} aria-label="Source Signal">
+          <strong>Source Signal</strong>
+          <ul style={signalListStyle}>
+            {signalDetail.signals.map((s, idx) => (
+              <li key={idx} style={signalItemStyle(signalDetail.verifiedIndex === idx)}>
+                {s.text}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {circleDetail && (
+        <section style={lifelinePanelStyle} aria-label="Trusted Circle">
+          <strong>Trusted Circle</strong>
+          <p style={{ margin: '0.4rem 0 0' }}>
+            Phase: {circleDetail.phase}
+            {' · '}
+            {circleDetail.contactName
+              ? `Contact: ${circleDetail.contactName}`
+              : 'No contact available (consensus fallback)'}
+          </p>
+        </section>
+      )}
 
       {snapshot.publicQuestion ? (
         <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={snapshot.lockedChoice} />

@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useGameStream } from '@/components/useGameStream';
 import { QuestionCard } from '@/components/QuestionCard';
 import { HoldScreen } from '@/components/HoldScreen';
+import { TimerChip } from '@/components/TimerChip';
 
 const pageStyle: CSSProperties = {
   minHeight: '100vh',
@@ -75,6 +76,8 @@ function HostView({ gameId }: { gameId: string }) {
   return (
     <div style={pageStyle}>
       <div style={stateBadgeStyle}>{snapshot.state}</div>
+
+      {snapshot.timer && <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />}
 
       {snapshot.publicQuestion ? (
         <QuestionCard q={snapshot.publicQuestion} reveal={snapshot.reveal} lockedChoice={snapshot.lockedChoice} />

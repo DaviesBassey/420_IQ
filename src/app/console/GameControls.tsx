@@ -2,9 +2,10 @@
 
 import { useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { useGameStream } from '@/components/useGameStream';
+import { TimerChip } from '@/components/TimerChip';
 import { nextActions } from './nextActions';
 import type { GameState } from '@/domain/fsm';
-import type { Confidence, LifelineType } from '@/domain/types';
+import type { Confidence, LifelineType, RiskBand } from '@/domain/types';
 
 // The console always acts as 'producer' — approvedBy on a score adjustment
 // must differ from this value (enforced server-side, checked here too for
@@ -18,6 +19,17 @@ const LIFELINE_LABELS: Record<LifelineType, string> = {
 
 const LIFELINE_TYPES: LifelineType[] = ['TRUSTED_CIRCLE', 'SOURCE_SIGNAL'];
 const CONFIDENCE_OPTIONS: Confidence[] = ['CURIOUS', 'CONFIDENT', 'CERTAIN'];
+const RISK_BANDS: RiskBand[] = ['HOLD', 'RISE', 'REACH'];
+
+// Trusted Circle phase progression the console can drive via
+// /lifelines/circle/resolve — null once there's no further phase to advance
+// to (LOCK is terminal; CONSENSUS_FALLBACK never has an advice/lock phase).
+const CIRCLE_NEXT_PHASE: Record<string, 'ADVICE' | 'LOCK' | null> = {
+  CONNECTING: 'ADVICE',
+  ADVICE: 'LOCK',
+  LOCK: null,
+  CONSENSUS_FALLBACK: null,
+};
 
 function displayLinks(gameId: string): { label: string; path: string }[] {
   return [
@@ -241,7 +253,15 @@ export function GameControls({ gameId }: { gameId: string }) {
   const [adjReason, setAdjReason] = useState('');
   const [adjApprovedBy, setAdjApprovedBy] = useState('');
 
-  const contestantIds = useMemo(() => (snapshot ? Object.keys(snapshot.scores) : []), [snapshot]);
+  const [stealContestantId, setStealContestantId] = useState('');
+  const [finalContestantId, setFinalContestantId] = useState('');
+  const [finalBand, setFinalBand] = useState<RiskBand>('HOLD');
+
+  // Contestant order comes from snapshot.contestants (array order), not a
+  // sort of the scores map's keys — the latter is an unordered object and
+  // gives no guarantee its key order matches the producer's intended slot
+  // assignment (IMPORTANT 6).
+  const contestantIds = useMemo(() => (snapshot?.contestants ?? []).map((c) => c.id), [snapshot]);
   const nameById = useMemo(
     () => Object.fromEntries((snapshot?.contestants ?? []).map((c) => [c.id, c.name])),
     [snapshot],
@@ -249,6 +269,13 @@ export function GameControls({ gameId }: { gameId: string }) {
   const nameFor = (cid: string) => nameById[cid] ?? cid;
   const effectiveLockContestantId = lockContestantId || snapshot?.activeContestantId || contestantIds[0] || '';
   const effectiveAdjContestantId = adjContestantId || contestantIds[0] || '';
+  // Steal is only ever available to the contestant who did NOT just answer —
+  // activeContestantId still points at the answering contestant through
+  // REVEAL (questionIndex only advances on NEXT_QUESTION), so the opponent is
+  // whichever other contestant id exists.
+  const nonActiveContestantId = contestantIds.find((cid) => cid !== snapshot?.activeContestantId) ?? contestantIds[0] ?? '';
+  const effectiveStealContestantId = stealContestantId || nonActiveContestantId;
+  const effectiveFinalContestantId = finalContestantId || contestantIds[0] || '';
 
   if (!snapshot) {
     return (
@@ -288,6 +315,38 @@ export function GameControls({ gameId }: { gameId: string }) {
       contestantId: effectiveLockContestantId,
       choiceIndex,
       confidence,
+      idempotencyKey: crypto.randomUUID(),
+    }));
+  }
+
+  function handleSteal(choiceIndex: number) {
+    if (!effectiveStealContestantId) return;
+    void run(() => postJson(`/api/games/${gameId}/steal`, {
+      contestantId: effectiveStealContestantId,
+      choiceIndex,
+      idempotencyKey: crypto.randomUUID(),
+    }));
+  }
+
+  function handleSignalSelect(index: number) {
+    void run(() => postJson(`/api/games/${gameId}/lifelines/signal/select`, {
+      index,
+      idempotencyKey: crypto.randomUUID(),
+    }));
+  }
+
+  function handleCircleAdvance(phase: 'ADVICE' | 'LOCK') {
+    void run(() => postJson(`/api/games/${gameId}/lifelines/circle/resolve`, {
+      phase, actor: ACTOR, idempotencyKey: crypto.randomUUID(),
+    }));
+  }
+
+  function handleFinalLock(choiceIndex: number) {
+    if (!effectiveFinalContestantId) return;
+    void run(() => postJson(`/api/games/${gameId}/final/lock`, {
+      contestantId: effectiveFinalContestantId,
+      band: finalBand,
+      choiceIndex,
       idempotencyKey: crypto.randomUUID(),
     }));
   }
@@ -332,6 +391,8 @@ export function GameControls({ gameId }: { gameId: string }) {
 
   const choices = snapshot.publicQuestion?.choices ?? [];
   const actions = nextActions(snapshot.state);
+  const circleDetail = snapshot.lifelineDetail?.type === 'TRUSTED_CIRCLE' ? snapshot.lifelineDetail : null;
+  const circleNextPhase = circleDetail ? CIRCLE_NEXT_PHASE[circleDetail.phase] : null;
 
   return (
     <div style={pageStyle}>
@@ -351,6 +412,12 @@ export function GameControls({ gameId }: { gameId: string }) {
 
       {snapshot.mode === 'rehearsal' && (
         <div style={rehearsalBannerStyle}>REHEARSAL MODE — NOT LIVE</div>
+      )}
+
+      {snapshot.timer && (
+        <div style={{ marginBottom: '0.75rem' }}>
+          <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />
+        </div>
       )}
 
       {error && (
@@ -492,6 +559,123 @@ export function GameControls({ gameId }: { gameId: string }) {
               </button>
             ))}
           </div>
+
+          {snapshot.stealOpen && (
+            <>
+              <h2 style={sectionTitleStyle}>Steal</h2>
+              <label style={labelStyle} htmlFor="stealContestant">Contestant</label>
+              <select
+                id="stealContestant"
+                style={fieldStyle}
+                value={effectiveStealContestantId}
+                onChange={(e) => setStealContestantId(e.target.value)}
+              >
+                {contestantIds.map((cid) => (
+                  <option key={cid} value={cid}>{nameFor(cid)}</option>
+                ))}
+              </select>
+              <div style={buttonRowStyle}>
+                {choices.length === 0 && <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>No choices to steal.</p>}
+                {choices.map((choice, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    style={actionButtonStyle}
+                    onClick={() => handleSteal(idx)}
+                    disabled={busy || !effectiveStealContestantId}
+                  >
+                    {idx + 1}. {choice}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {snapshot.lifelineDetail?.type === 'SOURCE_SIGNAL' && snapshot.lifelineDetail.verifiedIndex === null && (
+            <>
+              <h2 style={sectionTitleStyle}>Source Signal — pick one</h2>
+              <div style={buttonRowStyle}>
+                {snapshot.lifelineDetail.signals.map((s, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    style={actionButtonStyle}
+                    onClick={() => handleSignalSelect(idx)}
+                    disabled={busy}
+                  >
+                    {s.text}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {circleDetail && (
+            <>
+              <h2 style={sectionTitleStyle}>Trusted Circle</h2>
+              <p style={{ fontSize: '0.85rem', opacity: 0.85 }}>
+                Phase: {circleDetail.phase}
+                {' · '}
+                {circleDetail.contactName
+                  ? `Contact: ${circleDetail.contactName}`
+                  : 'No contact available (consensus fallback)'}
+              </p>
+              {circleNextPhase && (
+                <button
+                  type="button"
+                  style={actionButtonStyle}
+                  disabled={busy}
+                  onClick={() => handleCircleAdvance(circleNextPhase)}
+                >
+                  Advance to {circleNextPhase}
+                </button>
+              )}
+            </>
+          )}
+
+          {snapshot.state === 'FINAL' && (
+            <>
+              <h2 style={sectionTitleStyle}>Final Lock</h2>
+              <label style={labelStyle} htmlFor="finalContestant">Contestant</label>
+              <select
+                id="finalContestant"
+                style={fieldStyle}
+                value={effectiveFinalContestantId}
+                onChange={(e) => setFinalContestantId(e.target.value)}
+              >
+                {contestantIds.map((cid) => (
+                  <option key={cid} value={cid}>{nameFor(cid)}</option>
+                ))}
+              </select>
+
+              <label style={labelStyle} htmlFor="finalBand">Risk band</label>
+              <select
+                id="finalBand"
+                style={fieldStyle}
+                value={finalBand}
+                onChange={(e) => setFinalBand(e.target.value as RiskBand)}
+              >
+                {RISK_BANDS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+
+              <div style={buttonRowStyle}>
+                {choices.length === 0 && <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>No final question loaded.</p>}
+                {choices.map((choice, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    style={actionButtonStyle}
+                    onClick={() => handleFinalLock(idx)}
+                    disabled={busy || !effectiveFinalContestantId}
+                  >
+                    {idx + 1}. {choice}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <details style={detailsStyle}>
             <summary style={summaryStyle}>Adjust score</summary>

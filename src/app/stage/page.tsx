@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useGameStream } from '@/components/useGameStream';
 import { KnowledgeRing, type RingSegmentState, type KnowledgeRingProps } from '@/components/KnowledgeRing';
 import { HoldScreen } from '@/components/HoldScreen';
+import { TimerChip } from '@/components/TimerChip';
 import type { GameState } from '@/domain/fsm';
 import '@/styles/stage.css';
 
@@ -90,6 +91,33 @@ const overlayBodyStyle: CSSProperties = {
   fontSize: '1.1rem',
 };
 
+const stealBannerStyle: CSSProperties = {
+  padding: '0.5rem 1.25rem',
+  borderRadius: '999px',
+  background: 'var(--signal-red)',
+  color: 'var(--offwhite)',
+  fontWeight: 700,
+  fontSize: '1rem',
+  letterSpacing: '0.06em',
+  fontFamily: 'var(--font-ui)',
+};
+
+const lifelineStatusStyle: CSSProperties = {
+  fontFamily: 'var(--font-ui)',
+  fontSize: '1rem',
+  opacity: 0.9,
+};
+
+// Legible, simple status line for the stage display — the full lifeline
+// detail (signal texts, contact roster) lives on the console/contestant
+// pages; the stage only needs to communicate that a lifeline is in play and
+// roughly where it stands.
+function lifelineStatusText(detail: { type: 'TRUSTED_CIRCLE'; phase: string } | { type: 'SOURCE_SIGNAL'; verifiedIndex: number | null } | null): string | null {
+  if (!detail) return null;
+  if (detail.type === 'TRUSTED_CIRCLE') return `Trusted Circle — ${detail.phase}`;
+  return `Source Signal — ${detail.verifiedIndex !== null ? 'revealed' : 'selecting'}`;
+}
+
 // ANSWER_LOCKED gets the ring's single pulse ("locked"); COMPLETE gets the
 // slow victory glow; PRE_SHOW/INTRO (before any question has gone live) is
 // idle; every other in-round state drives the plain "live" ring.
@@ -124,24 +152,31 @@ function StageView({ gameId, vertical }: { gameId: string; vertical: boolean }) 
     return <HoldScreen />;
   }
 
-  const contestantIds = Object.keys(snapshot.scores).sort();
+  // Contestant order and display names come from snapshot.contestants (array
+  // order + name field), not a sort of the scores map's keys/ids (IMPORTANT 6)
+  // — the stage should read as names to a studio audience, not internal ids.
+  const contestants = snapshot.contestants;
   const segments = segmentsFor(snapshot.questionIndex);
   const ringState = ringStateFor(snapshot.state);
   const knowledgeDropText = snapshot.state === 'KNOWLEDGE_DROP' ? snapshot.reveal?.knowledgeDrop ?? null : null;
+  const lifelineStatus = lifelineStatusText(snapshot.lifelineDetail);
 
   return (
     <div className={`stage-grid${vertical ? ' stage-grid--vertical' : ''}`}>
       <div className="stage-grid__ribbon">
-        {contestantIds.map((cid) => (
-          <div key={cid} style={scoreCardStyle(snapshot.activeContestantId === cid)}>
-            <div style={scoreCardIdStyle}>{cid}</div>
-            <div style={scoreCardValueStyle}>{snapshot.scores[cid]}</div>
+        {contestants.map((c) => (
+          <div key={c.id} style={scoreCardStyle(snapshot.activeContestantId === c.id)}>
+            <div style={scoreCardIdStyle}>{c.name}</div>
+            <div style={scoreCardValueStyle}>{snapshot.scores[c.id]}</div>
           </div>
         ))}
       </div>
 
       <div className="stage-grid__ring">
         <div style={stateBadgeStyle}>{snapshot.state}</div>
+        {snapshot.timer && <TimerChip deadline={snapshot.timer.deadline} kind={snapshot.timer.kind} />}
+        {snapshot.stealOpen && <div style={stealBannerStyle}>STEAL WINDOW</div>}
+        {lifelineStatus && <div style={lifelineStatusStyle}>{lifelineStatus}</div>}
         <KnowledgeRing
           segments={segments}
           ringState={ringState}

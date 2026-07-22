@@ -1,8 +1,10 @@
 'use client';
 
-import { Suspense, useState, type CSSProperties, type FormEvent } from 'react';
+import { Suspense, useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GameControls } from './GameControls';
+
+interface PackOption { id: string; episodeId: string; approvedBy: string | null }
 
 const containerStyle: CSSProperties = {
   minHeight: '100vh',
@@ -80,6 +82,33 @@ function CreateGameForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Approved packs to populate the picker; null while loading. A fetch
+  // failure (or non-OK response) falls back to manual entry rather than
+  // leaving the operator stuck with an empty select.
+  const [approvedPacks, setApprovedPacks] = useState<PackOption[] | null>(null);
+  const [manualPackEntry, setManualPackEntry] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/packs');
+        if (!res.ok) throw new Error(`GET /api/packs failed (${res.status})`);
+        const data = await res.json();
+        const packs = ((data.packs ?? []) as PackOption[]).filter((p) => p.approvedBy !== null);
+        if (cancelled) return;
+        setApprovedPacks(packs);
+        if (packs.length > 0) setPackId(packs[0].id);
+      } catch {
+        if (cancelled) return;
+        setManualPackEntry(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -129,18 +158,41 @@ function CreateGameForm() {
         )}
 
         <label style={labelStyle} htmlFor="packId">
-          Pack ID
+          Pack
         </label>
-        {/* GET /api/packs does not exist yet (Task 18 adds a pack picker) — a
-            plain text input is the interim way to select a pack. */}
-        <input
-          id="packId"
-          name="packId"
-          style={fieldStyle}
-          value={packId}
-          onChange={(e) => setPackId(e.target.value)}
-          required
-        />
+        {!manualPackEntry && approvedPacks !== null ? (
+          <select
+            id="packId"
+            name="packId"
+            style={fieldStyle}
+            value={packId}
+            onChange={(e) => {
+              if (e.target.value === '__other__') {
+                setManualPackEntry(true);
+                setPackId('');
+                return;
+              }
+              setPackId(e.target.value);
+            }}
+            required
+          >
+            {approvedPacks.length === 0 && <option value="">No approved packs yet</option>}
+            {approvedPacks.map((p) => (
+              <option key={p.id} value={p.id}>{p.episodeId} — {p.id.slice(0, 8)}</option>
+            ))}
+            <option value="__other__">Other (enter pack ID manually)</option>
+          </select>
+        ) : (
+          <input
+            id="packId"
+            name="packId"
+            style={fieldStyle}
+            value={packId}
+            onChange={(e) => setPackId(e.target.value)}
+            placeholder="Pack ID"
+            required
+          />
+        )}
 
         <label style={labelStyle} htmlFor="mode">
           Mode
