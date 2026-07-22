@@ -84,6 +84,7 @@ interface FoldResult {
   stealRecorded: boolean; // one-shot guard: has a STEAL already landed for the current question?
   timer: TimerState;
   lifelineDetail: FoldLifelineDetail;
+  pendingFinal: { contestantId: string; band: RiskBand; correct: boolean } | null; // one-shot guard: has a FINAL_LOCK already landed while still in FINAL?
 }
 
 // Pure helper, isolated from fold()'s loop so TypeScript can narrow the
@@ -183,7 +184,7 @@ function fold(events: GameEventRow[]): FoldResult {
     }
   }
 
-  return { state, questionIndex, lastAnswer, lockedChoice, confidenceUses, scoreEvents, seenKeys, stealRecorded, timer, lifelineDetail };
+  return { state, questionIndex, lastAnswer, lockedChoice, confidenceUses, scoreEvents, seenKeys, stealRecorded, timer, lifelineDetail, pendingFinal };
 }
 
 // Steal round opens in REVEAL only when the last answer was wrong AND the
@@ -526,6 +527,14 @@ export class GameEngine {
 
     if (folded.state !== 'FINAL') throw new Error(`ILLEGAL_TRANSITION:${folded.state}->FINAL_LOCK`);
 
+    // Guard against a second FINAL_LOCK (under a different idempotencyKey)
+    // silently overwriting the fold's pendingFinal — same-key replay is
+    // already handled above via seenKeys, so this only fires for a genuinely
+    // new lock attempt while one is already pending for this FINAL round.
+    if (folded.pendingFinal) throw new Error('FINAL_ALREADY_LOCKED');
+
+    if (!session.contestants.some((c) => c.id === contestantId)) throw new Error('UNKNOWN_CONTESTANT');
+
     const { questionId } = questionRefFor(pack.lanes, session.contestants, folded.questionIndex);
     const qv = await this.repos.questions.latestVersion(questionId);
     if (!qv) throw new Error(`QUESTION_NOT_FOUND:${questionId}`);
@@ -595,6 +604,8 @@ export function engineErrorStatus(err: unknown): number {
       || err.message === 'NO_SIGNALS_FOR_QUESTION'
       || err.message === 'ADJUSTMENT_REASON_REQUIRED'
       || err.message === 'ADJUSTMENT_REQUIRES_INDEPENDENT_APPROVER'
+      || err.message === 'FINAL_ALREADY_LOCKED'
+      || err.message === 'UNKNOWN_CONTESTANT'
     ) {
       return 409;
     }

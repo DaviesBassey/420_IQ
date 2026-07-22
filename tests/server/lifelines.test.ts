@@ -124,6 +124,23 @@ describe('FOLD-IN A: lockFinal', () => {
     const final2 = await engine.transition(gameId2, 'COMPLETE', 'prod', 'g9');
     expect(final2.scores.c1).toBeGreaterThanOrEqual(0);
   });
+
+  it('rejects a second lockFinal under a different idempotencyKey and preserves the original wager through COMPLETE scoring', async () => {
+    const { correctIndex } = await walkToFinal();
+    const beforeScore = (await engine.snapshot(gameId)).scores.c1;
+    await engine.lockFinal(gameId, 'c1', 'RISE', correctIndex, 'flk-first');
+    const wrongIndex = (correctIndex + 1) % 4;
+    await expect(engine.lockFinal(gameId, 'c1', 'REACH', wrongIndex, 'flk-second')).rejects.toThrow('FINAL_ALREADY_LOCKED');
+
+    // The original RISE/correct wager should still be the one that scores.
+    const s = await engine.transition(gameId, 'COMPLETE', 'prod', 'flk-complete');
+    expect(s.scores.c1).toBe(beforeScore + 500); // FORMAT_V1.final.RISE
+  });
+
+  it('rejects lockFinal for a contestantId not in the session', async () => {
+    await walkToFinal();
+    await expect(engine.lockFinal(gameId, 'ghost', 'RISE', 0, 'flk-ghost')).rejects.toThrow('UNKNOWN_CONTESTANT');
+  });
 });
 
 describe('FOLD-IN B: adjustScore idempotency', () => {
