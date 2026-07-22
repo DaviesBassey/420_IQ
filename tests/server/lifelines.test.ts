@@ -4,12 +4,12 @@ import { seedDatabase } from '@/data/seedData';
 import { generatePack, approvePack } from '@/server/packService';
 import { GameEngine } from '@/server/gameEngine';
 
-let repos: Repos; let engine: GameEngine; let gameId: string;
+let repos: Repos; let engine: GameEngine; let gameId: string; let packId: string;
 
 beforeEach(async () => {
   repos = createRepos(':memory:');
   await seedDatabase(repos);
-  const { packId } = await generatePack(repos, { episodeId: 'e', laneCount: 2, questionsPerLane: 6 });
+  ({ packId } = await generatePack(repos, { episodeId: 'e', laneCount: 2, questionsPerLane: 6 }));
   await approvePack(repos, packId, 'ep');
   engine = new GameEngine(repos);
   gameId = await engine.createGame(packId, 'live', [{ id: 'c1', name: 'Ada' }, { id: 'c2', name: 'Ben' }]);
@@ -83,20 +83,37 @@ describe('Source Signal', () => {
 });
 
 describe('FOLD-IN A: lockFinal', () => {
-  async function walkToFinal(): Promise<{ questionId: string; correctIndex: number }> {
-    // Advance from QUESTION_LIVE (set up in beforeEach) all the way to FINAL
-    // via the shortest legal path: lock an answer, reveal, commit, then FINAL.
+  // Advance from QUESTION_LIVE (set up in beforeEach) all the way to FINAL via
+  // the shortest legal path: lock c1's first lane question, reveal, commit,
+  // then FINAL. Returns the *final* question — c1's own lane's first
+  // not-yet-committed question (lane position 1, since position 0 was just
+  // committed above) — which is a different question from the one just
+  // revealed; that's the behavior under test (IMPORTANT 3).
+  async function walkToFinal(): Promise<{ questionId: string; correctIndex: number; choices: string[] }> {
     const snap = await engine.snapshot(gameId);
-    const qv = await repos.questions.latestVersion(snap.publicQuestion!.questionId);
+    const revealedQuestionId = snap.publicQuestion!.questionId;
+    const qv = await repos.questions.latestVersion(revealedQuestionId);
     await engine.lockAnswer(gameId, 'c1', qv!.correctIndex, 'CURIOUS', 'fa1');
     await engine.transition(gameId, 'REVEAL', 'prod', 'fa2');
     await engine.transition(gameId, 'SCORE_COMMITTED', 'prod', 'fa3');
     await engine.transition(gameId, 'FINAL', 'prod', 'fa4');
-    return { questionId: snap.publicQuestion!.questionId, correctIndex: qv!.correctIndex };
+
+    const pack = await repos.packs.get(packId);
+    const finalQuestionId = pack!.lanes[0][1]; // c1 is lane 0; position 0 just committed
+    expect(finalQuestionId).not.toBe(revealedQuestionId);
+    const finalQv = await repos.questions.latestVersion(finalQuestionId);
+    return { questionId: finalQuestionId, correctIndex: finalQv!.correctIndex, choices: finalQv!.choices };
   }
 
   it('rejects lockFinal outside FINAL state', async () => {
     await expect(engine.lockFinal(gameId, 'c1', 'RISE', 0, 'flx')).rejects.toThrow('ILLEGAL_TRANSITION');
+  });
+
+  it('grades against the first unplayed lane question, not the last-revealed one', async () => {
+    const { questionId, correctIndex } = await walkToFinal();
+    const s = await engine.lockFinal(gameId, 'c1', 'RISE', correctIndex, 'flk-grade');
+    expect(s.state).toBe('FINAL'); // grading is deferred to COMPLETE
+    expect(s.publicQuestion?.questionId).toBe(questionId); // displays already show the final question
   });
 
   it('changes score by +band on a correct final and never drops below zero on a wrong one', async () => {
@@ -115,11 +132,13 @@ describe('FOLD-IN A: lockFinal', () => {
       await engine.transition(gameId2, to, 'prod', k);
     const snap2 = await engine.snapshot(gameId2);
     const qv2 = await repos.questions.latestVersion(snap2.publicQuestion!.questionId);
-    const wrongIndex = (qv2!.correctIndex + 1) % qv2!.choices.length;
     await engine.lockAnswer(gameId2, 'c1', qv2!.correctIndex, 'CURIOUS', 'g4');
     await engine.transition(gameId2, 'REVEAL', 'prod', 'g5');
     await engine.transition(gameId2, 'SCORE_COMMITTED', 'prod', 'g6');
     await engine.transition(gameId2, 'FINAL', 'prod', 'g7');
+    const pack2 = await repos.packs.get(packId2);
+    const finalQv2 = await repos.questions.latestVersion(pack2!.lanes[0][1]);
+    const wrongIndex = (finalQv2!.correctIndex + 1) % finalQv2!.choices.length;
     await engine.lockFinal(gameId2, 'c1', 'REACH', wrongIndex, 'g8');
     const final2 = await engine.transition(gameId2, 'COMPLETE', 'prod', 'g9');
     expect(final2.scores.c1).toBeGreaterThanOrEqual(0);
@@ -140,6 +159,33 @@ describe('FOLD-IN A: lockFinal', () => {
   it('rejects lockFinal for a contestantId not in the session', async () => {
     await walkToFinal();
     await expect(engine.lockFinal(gameId, 'ghost', 'RISE', 0, 'flk-ghost')).rejects.toThrow('UNKNOWN_CONTESTANT');
+  });
+
+  it('throws NO_FINAL_QUESTION once the wagering contestant\'s lane is exhausted', async () => {
+    // Build a standalone one-question-per-lane pack so a single committed
+    // question exhausts c1's lane entirely.
+    const bareRepos = createRepos(':memory:');
+    const makeQ = async (factKey: string) => bareRepos.questions.create({
+      questionId: '', version: 1, domain: 'SCIENCE', difficulty: 'SPARK', stem: `${factKey}?`,
+      choices: ['a', 'b', 'c', 'd'], correctIndex: 0, explanation: 'e', knowledgeDrop: null,
+      sourceTitle: 't', sourceUrl: 'https://x', correctAsOf: '2026-01-01', jurisdiction: null,
+      sensitivityTier: 1, expiresAt: null, readTimeSec: 8, factKey, demoFlag: null,
+      status: 'APPROVED',
+    });
+    const q1 = await makeQ('exhaust-lane-c1');
+    const q2 = await makeQ('exhaust-lane-c2');
+    const barePackId = await bareRepos.packs.create({ episodeId: 'e', seed: 's', lanes: [[q1], [q2]], reportJson: '{}' });
+    await bareRepos.packs.approve(barePackId, 'ep');
+    const bareEngine = new GameEngine(bareRepos);
+    const gid = await bareEngine.createGame(barePackId, 'live', [{ id: 'c1', name: 'Ada' }, { id: 'c2', name: 'Ben' }]);
+    await bareEngine.transition(gid, 'INTRO', 'p', 'n1');
+    await bareEngine.transition(gid, 'QUESTION_READY', 'p', 'n2');
+    await bareEngine.transition(gid, 'QUESTION_LIVE', 'p', 'n3');
+    await bareEngine.lockAnswer(gid, 'c1', 0, 'CURIOUS', 'n4');
+    await bareEngine.transition(gid, 'REVEAL', 'p', 'n5');
+    await bareEngine.transition(gid, 'SCORE_COMMITTED', 'p', 'n6');
+    await bareEngine.transition(gid, 'FINAL', 'p', 'n7');
+    await expect(bareEngine.lockFinal(gid, 'c1', 'HOLD', 0, 'n8')).rejects.toThrow('NO_FINAL_QUESTION');
   });
 });
 

@@ -113,6 +113,36 @@ describe('GameEngine', () => {
     expect(revealSnap.stealOpen).toBe(false);
     await expect(engine.recordSteal(gameId, 'c2', 0, 'k6')).rejects.toThrow('STEAL_NOT_OPEN');
   });
+  it('rejects createGame for a pack that does not exist', async () => {
+    await expect(engine.createGame('no-such-pack', 'live', CONTESTANTS)).rejects.toThrow('PACK_NOT_FOUND');
+  });
+  it('rejects createGame for a pack that has not been approved', async () => {
+    const { packId } = await generatePack(repos, { episodeId: 'e4', laneCount: 2, questionsPerLane: 6 });
+    await expect(engine.createGame(packId, 'live', CONTESTANTS)).rejects.toThrow('PACK_NOT_APPROVED');
+  });
+  it('rejects createGame when the contestant count does not match the lane count', async () => {
+    const { packId } = await generatePack(repos, { episodeId: 'e5', laneCount: 2, questionsPerLane: 6 });
+    await approvePack(repos, packId, 'ep');
+    await expect(engine.createGame(packId, 'live', [{ id: 'c1', name: 'Ada' }]))
+      .rejects.toThrow('CONTESTANT_COUNT_MISMATCH');
+  });
+  it('rejects NEXT_QUESTION once every lane is exhausted, but FINAL still works', async () => {
+    await engine.transition(gameId, 'INTRO', 'prod', 'nq0');
+    // laneCount 2 x questionsPerLane 6 (see beforeEach) = 12 total questions.
+    for (let i = 0; i < 12; i++) {
+      await engine.transition(gameId, 'QUESTION_READY', 'prod', `nq-ready-${i}`);
+      await engine.transition(gameId, 'QUESTION_LIVE', 'prod', `nq-live-${i}`);
+      const active = (await engine.snapshot(gameId)).activeContestantId!;
+      await engine.lockAnswer(gameId, active, 0, 'CURIOUS', `nq-lock-${i}`);
+      await engine.transition(gameId, 'REVEAL', 'prod', `nq-reveal-${i}`);
+      await engine.transition(gameId, 'SCORE_COMMITTED', 'prod', `nq-commit-${i}`);
+      if (i < 11) await engine.transition(gameId, 'NEXT_QUESTION', 'prod', `nq-next-${i}`);
+    }
+    await expect(engine.transition(gameId, 'NEXT_QUESTION', 'prod', 'nq-next-final'))
+      .rejects.toThrow('LANES_EXHAUSTED');
+    const s = await engine.transition(gameId, 'FINAL', 'prod', 'nq-final');
+    expect(s.state).toBe('FINAL');
+  });
   it('rehearsal mode never marks questions used', async () => {
     const { packId } = await generatePack(repos, { episodeId: 'e2', laneCount: 2, questionsPerLane: 6 });
     await approvePack(repos, packId, 'ep');

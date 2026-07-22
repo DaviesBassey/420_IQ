@@ -220,6 +220,43 @@ function questionRefFor(
   return { contestantId: contestants[laneIdx].id, questionId: lanes[laneIdx][pos] };
 }
 
+// True when `questionIndex` still has a corresponding question in the lanes
+// (i.e. the per-lane position it maps to is within that lane's bounds). Used
+// both to reject a NEXT_QUESTION transition that would run off the end of the
+// pack, and (via committedLaneCount below) to locate the Final Round question.
+function questionExistsAt(lanes: string[][], contestantsLength: number, questionIndex: number): boolean {
+  const laneIdx = questionIndex % contestantsLength;
+  const pos = Math.floor(questionIndex / contestantsLength);
+  return pos < (lanes[laneIdx]?.length ?? 0);
+}
+
+// How many of `contestantId`'s own lane questions have already been committed
+// (i.e. reached SCORE_COMMITTED with them as the answering contestant). Only
+// ANSWER score events count — a STEAL is recorded against the stealing
+// contestant, not the lane owner, so it never advances the owner's own lane
+// position.
+function committedLaneCount(scoreEvents: ScoreEvent[], contestantId: string): number {
+  return scoreEvents.filter((e) => e.kind === 'ANSWER' && e.contestantId === contestantId).length;
+}
+
+// The Final Round question for a specific wagering contestant: their own
+// lane's first not-yet-committed question (never the one they, or anyone
+// else, just answered/revealed). Returns null when that contestant's lane is
+// exhausted (every question in it has already been committed).
+function finalQuestionRefFor(
+  lanes: string[][],
+  contestants: { id: string; name: string }[],
+  contestantId: string,
+  scoreEvents: ScoreEvent[],
+): { contestantId: string; questionId: string } | null {
+  const laneIdx = contestants.findIndex((c) => c.id === contestantId);
+  if (laneIdx === -1) return null;
+  const position = committedLaneCount(scoreEvents, contestantId);
+  const lane = lanes[laneIdx];
+  if (!lane || position >= lane.length) return null;
+  return { contestantId, questionId: lane[position] };
+}
+
 const LIFELINE_TYPES: LifelineType[] = ['TRUSTED_CIRCLE', 'SOURCE_SIGNAL'];
 
 // Whose turn it is: pure function of (contestants, state, questionIndex), so
@@ -238,6 +275,10 @@ export class GameEngine {
   constructor(private repos: Repos) {}
 
   async createGame(packId: string, mode: SessionMode, contestants: { id: string; name: string }[]): Promise<string> {
+    const pack = await this.repos.packs.get(packId);
+    if (!pack) throw new Error('PACK_NOT_FOUND');
+    if (!pack.approvedBy) throw new Error('PACK_NOT_APPROVED');
+    if (contestants.length !== pack.lanes.length) throw new Error('CONTESTANT_COUNT_MISMATCH');
     return this.repos.games.create({ packId, mode, contestants });
   }
 
@@ -253,6 +294,8 @@ export class GameEngine {
   async snapshot(gameId: string): Promise<GameSnapshot> {
     const { session, pack, folded } = await this.loadCore(gameId);
 
+    const activeContestantId = activeContestantIdFor(session.contestants, folded.state, folded.questionIndex);
+
     let publicQuestion: PublicQuestion | null = null;
     let reveal: RevealPayload | null = null;
     if (QUESTION_STATES.includes(folded.state)) {
@@ -261,6 +304,17 @@ export class GameEngine {
       if (qv) {
         publicQuestion = toPublicQuestion(qv);
         if (REVEAL_STATES.includes(folded.state)) reveal = toRevealPayload(qv);
+      }
+    } else if (folded.state === 'FINAL' && activeContestantId) {
+      // The Final Round question is scoped to whichever contestant is set to
+      // wager (activeContestantId, carried over from the last question turn):
+      // their own lane's first not-yet-committed question, never the one
+      // whose answer was just revealed. Public projection only — no
+      // correctIndex — same as every other in-round publicQuestion.
+      const ref = finalQuestionRefFor(pack.lanes, session.contestants, activeContestantId, folded.scoreEvents);
+      if (ref) {
+        const qv = await this.repos.questions.latestVersion(ref.questionId);
+        if (qv) publicQuestion = toPublicQuestion(qv);
       }
     }
 
@@ -275,8 +329,6 @@ export class GameEngine {
       for (const type of LIFELINE_TYPES) used[type] = await this.repos.games.lifelineUsed(gameId, c.id, type);
       lifelines[c.id] = used;
     }
-
-    const activeContestantId = activeContestantIdFor(session.contestants, folded.state, folded.questionIndex);
 
     const confidence = CONFIDENCE_VISIBLE_STATES.includes(folded.state) ? (folded.lastAnswer?.confidence ?? null) : null;
 
@@ -334,6 +386,14 @@ export class GameEngine {
     if (folded.seenKeys.has(idempotencyKey)) return this.snapshot(gameId); // idempotent replay
 
     if (!canTransition(folded.state, to)) throw new Error(`ILLEGAL_TRANSITION:${folded.state}->${to}`);
+
+    // NEXT_QUESTION must land on a real question — reject it once the
+    // incremented questionIndex would run past the end of every lane. FINAL
+    // remains legal from SCORE_COMMITTED regardless (that's the producer's
+    // way out once the lanes are exhausted).
+    if (to === 'NEXT_QUESTION' && !questionExistsAt(pack.lanes, session.contestants.length, folded.questionIndex + 1)) {
+      throw new Error('LANES_EXHAUSTED');
+    }
 
     const stealOpen = computeStealOpen(to, folded.lastAnswer);
     const timer = timerForTransition(to, stealOpen);
@@ -514,13 +574,11 @@ export class GameEngine {
     return snap;
   }
 
-  // FOLD-IN A: the Final Round wager lock. Valid only in FINAL state. FINAL
-  // has no dedicated "final question" concept of its own — by the time the
-  // producer transitions SCORE_COMMITTED -> FINAL, questionIndex already
-  // points at the last question in the lane sequence (NEXT_QUESTION is what
-  // advances it, and the producer takes the FINAL branch instead once the
-  // lanes are exhausted), so grading reuses questionRefFor at the current
-  // questionIndex rather than tracking a second question pointer.
+  // FOLD-IN A: the Final Round wager lock. Valid only in FINAL state. Grades
+  // against the wagering contestant's own FIRST UNPLAYED lane question (their
+  // committed-lane position — see committedLaneCount/finalQuestionRefFor) —
+  // never the last-revealed question — so the Final Round is always a fresh
+  // question the contestant hasn't already seen the answer to.
   async lockFinal(gameId: string, contestantId: string, band: RiskBand, choiceIndex: number, idempotencyKey: string): Promise<GameSnapshot> {
     const { session, pack, folded } = await this.loadCore(gameId);
     if (folded.seenKeys.has(idempotencyKey)) return this.snapshot(gameId); // idempotent replay
@@ -535,9 +593,10 @@ export class GameEngine {
 
     if (!session.contestants.some((c) => c.id === contestantId)) throw new Error('UNKNOWN_CONTESTANT');
 
-    const { questionId } = questionRefFor(pack.lanes, session.contestants, folded.questionIndex);
-    const qv = await this.repos.questions.latestVersion(questionId);
-    if (!qv) throw new Error(`QUESTION_NOT_FOUND:${questionId}`);
+    const ref = finalQuestionRefFor(pack.lanes, session.contestants, contestantId, folded.scoreEvents);
+    if (!ref) throw new Error('NO_FINAL_QUESTION');
+    const qv = await this.repos.questions.latestVersion(ref.questionId);
+    if (!qv) throw new Error(`QUESTION_NOT_FOUND:${ref.questionId}`);
     const correct = choiceIndex === qv.correctIndex;
 
     // The scoring effect itself is deferred: fold() only flushes the FINAL
@@ -606,10 +665,15 @@ export function engineErrorStatus(err: unknown): number {
       || err.message === 'ADJUSTMENT_REQUIRES_INDEPENDENT_APPROVER'
       || err.message === 'FINAL_ALREADY_LOCKED'
       || err.message === 'UNKNOWN_CONTESTANT'
+      || err.message === 'PACK_NOT_APPROVED'
+      || err.message === 'CONTESTANT_COUNT_MISMATCH'
+      || err.message === 'NO_FINAL_QUESTION'
+      || err.message === 'LANES_EXHAUSTED'
     ) {
       return 409;
     }
     if (err.message.startsWith('PACK_NOT_FOUND')) return 404;
+    if (err.message.startsWith('GAME_NOT_FOUND')) return 404;
   }
   return 500;
 }
