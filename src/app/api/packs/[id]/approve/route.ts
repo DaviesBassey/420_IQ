@@ -1,0 +1,26 @@
+import { z } from 'zod';
+import { getRepos } from '@/server/context';
+import { approvePack } from '@/server/packService';
+
+const bodySchema = z.object({
+  approver: z.string(),
+});
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const parsed = bodySchema.safeParse(body);
+  if (!parsed.success) {
+    return Response.json({ error: parsed.error.message }, { status: 400 });
+  }
+
+  const result = await approvePack(getRepos(), id, parsed.data.approver);
+  return Response.json(result);
+}
